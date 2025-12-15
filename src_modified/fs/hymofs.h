@@ -9,6 +9,13 @@
 
 #define HYMO_MAGIC_POS 0x7000000000000000ULL
 
+struct linux_dirent {
+	unsigned long	d_ino;
+	unsigned long	d_off;
+	unsigned short	d_reclen;
+	char		d_name[];
+};
+
 #define HYMO_CTL_NAME "hymo_ctl"
 #define HYMO_CTL_PATH "/dev/" HYMO_CTL_NAME
 #define HYMO_MIRROR_NAME "hymo_mirror"

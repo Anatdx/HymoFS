@@ -933,13 +933,6 @@ bool __hymofs_check_filldir(struct hymo_readdir_context *ctx, const char *name, 
 }
 EXPORT_SYMBOL(__hymofs_check_filldir);
 
-struct linux_dirent {
-	unsigned long	d_ino;
-	unsigned long	d_off;
-	unsigned short	d_reclen;
-	char		d_name[];
-};
-
 /* Inject virtual entries into getdents system call */
 int hymofs_inject_entries(struct hymo_readdir_context *ctx, void __user **dir_ptr, int *count, loff_t *pos)
 {

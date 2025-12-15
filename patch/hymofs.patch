@@ -1,17 +1,17 @@
 diff -ruN src_origin/fs/d_path.c src_modified/fs/d_path.c
---- src_origin/fs/d_path.c	2025-12-14 19:28:34.291613119 +0800
-+++ src_modified/fs/d_path.c	2025-12-14 19:28:34.288704127 +0800
-@@ -8,6 +8,9 @@
+--- src_origin/fs/d_path.c	2025-12-15 14:23:24.661309147 +0800
++++ src_modified/fs/d_path.c	2025-12-15 14:24:10.229620029 +0800
+@@ -7,6 +7,9 @@
+ #include <linux/slab.h>
  #include <linux/prefetch.h>
  #include "mount.h"
- #include "internal.h"
 +#ifdef CONFIG_HYMOFS
 +#include "hymofs.h"
 +#endif
  
  struct prepend_buffer {
  	char *buf;
-@@ -291,7 +294,26 @@
+@@ -290,7 +293,26 @@
  	prepend_path(path, &root, &b);
  	rcu_read_unlock();
  
@@ -40,7 +40,7 @@ diff -ruN src_origin/fs/d_path.c src_modified/fs/d_path.c
  
 diff -ruN src_origin/fs/hymofs.c src_modified/fs/hymofs.c
 --- src_origin/fs/hymofs.c	1970-01-01 08:00:00.000000000 +0800
-+++ src_modified/fs/hymofs.c	2025-12-15 13:36:42.230038855 +0800
++++ src_modified/fs/hymofs.c	2025-12-15 14:13:06.200505957 +0800
 @@ -0,0 +1,1218 @@
 +#include <linux/string.h>
 +#include <linux/mm.h>
@@ -1262,7 +1262,7 @@ diff -ruN src_origin/fs/hymofs.c src_modified/fs/hymofs.c
 +#endif /* CONFIG_HYMOFS */
 diff -ruN src_origin/fs/hymofs.h src_modified/fs/hymofs.h
 --- src_origin/fs/hymofs.h	1970-01-01 08:00:00.000000000 +0800
-+++ src_modified/fs/hymofs.h	2025-12-15 13:37:08.459223115 +0800
++++ src_modified/fs/hymofs.h	2025-12-15 14:13:06.294817555 +0800
 @@ -0,0 +1,115 @@
 +#ifndef _LINUX_HYMOFS_H
 +#define _LINUX_HYMOFS_H
@@ -1381,7 +1381,7 @@ diff -ruN src_origin/fs/hymofs.h src_modified/fs/hymofs.h
 +#endif /* _LINUX_HYMOFS_H */
 diff -ruN src_origin/fs/hymofs_ioctl.h src_modified/fs/hymofs_ioctl.h
 --- src_origin/fs/hymofs_ioctl.h	1970-01-01 08:00:00.000000000 +0800
-+++ src_modified/fs/hymofs_ioctl.h	2025-12-15 13:41:10.091905776 +0800
++++ src_modified/fs/hymofs_ioctl.h	2025-12-15 14:13:06.267349938 +0800
 @@ -0,0 +1,36 @@
 +#ifndef _HYMOFS_IOCTL_H
 +#define _HYMOFS_IOCTL_H
@@ -1420,9 +1420,9 @@ diff -ruN src_origin/fs/hymofs_ioctl.h src_modified/fs/hymofs_ioctl.h
 +
 +#endif
 diff -ruN src_origin/fs/Kconfig src_modified/fs/Kconfig
---- src_origin/fs/Kconfig	2025-12-13 16:03:28.130952817 +0800
-+++ src_modified/fs/Kconfig	2025-12-12 17:32:32.094150462 +0800
-@@ -405,4 +405,10 @@
+--- src_origin/fs/Kconfig	2025-12-15 11:12:29.738144761 +0800
++++ src_modified/fs/Kconfig	2025-12-15 14:13:53.171885021 +0800
+@@ -386,4 +386,10 @@
  config IO_WQ
  	bool
  
@@ -1434,21 +1434,21 @@ diff -ruN src_origin/fs/Kconfig src_modified/fs/Kconfig
 +
  endmenu
 diff -ruN src_origin/fs/Makefile src_modified/fs/Makefile
---- src_origin/fs/Makefile	2025-12-13 16:03:28.130952817 +0800
-+++ src_modified/fs/Makefile	2025-12-14 18:59:54.873587481 +0800
-@@ -22,6 +22,8 @@
+--- src_origin/fs/Makefile	2025-12-15 11:12:29.738144761 +0800
++++ src_modified/fs/Makefile	2025-12-15 14:14:47.595848306 +0800
+@@ -17,6 +17,8 @@
  		fs_types.o fs_context.o fs_parser.o fsopen.o init.o \
- 		kernel_read_file.o mnt_idmapping.o remap_range.o
+ 		kernel_read_file.o remap_range.o
  
 +obj-$(CONFIG_HYMOFS) += hymofs.o
 +
- obj-$(CONFIG_BUFFER_HEAD)	+= buffer.o mpage.o
- obj-$(CONFIG_PROC_FS)		+= proc_namespace.o
- obj-$(CONFIG_LEGACY_DIRECT_IO)	+= direct-io.o
+ PGO_PROFILE_xattr.o := n
+ 
+ ifeq ($(CONFIG_BLOCK),y)
 diff -ruN src_origin/fs/namei.c src_modified/fs/namei.c
---- src_origin/fs/namei.c	2025-12-13 16:03:28.202981278 +0800
-+++ src_modified/fs/namei.c	2025-12-14 19:28:34.289782989 +0800
-@@ -44,6 +44,9 @@
+--- src_origin/fs/namei.c	2025-12-15 11:12:29.832145417 +0800
++++ src_modified/fs/namei.c	2025-12-15 14:15:58.147131908 +0800
+@@ -43,6 +43,9 @@
  
  #include "internal.h"
  #include "mount.h"
@@ -1458,7 +1458,7 @@ diff -ruN src_origin/fs/namei.c src_modified/fs/namei.c
  
  /* [Feb-1997 T. Schoebel-Theuer]
   * Fundamental changes in the pathname lookup mechanisms (namei)
-@@ -126,8 +129,22 @@
+@@ -125,8 +128,22 @@
  
  #define EMBEDDED_NAME_MAX	(PATH_MAX - offsetof(struct filename, iname))
  
@@ -1482,19 +1482,20 @@ diff -ruN src_origin/fs/namei.c src_modified/fs/namei.c
  	struct filename *result;
  	char *kname;
 diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
---- src_origin/fs/readdir.c	2025-12-13 16:03:28.254690749 +0800
-+++ src_modified/fs/readdir.c	2025-12-12 17:32:32.094246643 +0800
-@@ -23,6 +23,9 @@
+--- src_origin/fs/readdir.c	2025-12-15 11:12:29.892748524 +0800
++++ src_modified/fs/readdir.c	2025-12-15 14:18:40.259887408 +0800
+@@ -23,6 +23,10 @@
  #include <linux/uaccess.h>
  
  #include <asm/unaligned.h>
 +#ifdef CONFIG_HYMOFS
 +#include "hymofs.h"
 +#endif
++
  
  /*
-  * Some filesystems were never converted to '->iterate_shared()'
-@@ -172,6 +175,9 @@
+  * Note the "unsafe_put_user() semantics: we goto a
+@@ -136,6 +140,9 @@
  
  struct readdir_callback {
  	struct dir_context ctx;
@@ -1504,7 +1505,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	struct old_linux_dirent __user * dirent;
  	int result;
  };
-@@ -225,11 +231,17 @@
+@@ -189,11 +196,17 @@
  
  	if (!f.file)
  		return -EBADF;
@@ -1522,7 +1523,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	fdput_pos(f);
  	return error;
  }
-@@ -249,6 +261,9 @@
+@@ -213,6 +226,9 @@
  
  struct getdents_callback {
  	struct dir_context ctx;
@@ -1532,7 +1533,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	struct linux_dirent __user * current_dir;
  	int prev_reclen;
  	int count;
-@@ -266,6 +281,9 @@
+@@ -230,6 +246,9 @@
  		sizeof(long));
  	int prev_reclen;
  
@@ -1542,7 +1543,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	buf->error = verify_dirent_name(name, namlen);
  	if (unlikely(buf->error))
  		return false;
-@@ -318,6 +336,20 @@
+@@ -282,6 +301,20 @@
  	f = fdget_pos(fd);
  	if (!f.file)
  		return -EBADF;
@@ -1563,7 +1564,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  
  	error = iterate_dir(f.file, &buf.ctx);
  	if (error >= 0)
-@@ -331,12 +363,24 @@
+@@ -295,12 +328,24 @@
  		else
  			error = count - buf.count;
  	}
@@ -1588,7 +1589,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	struct linux_dirent64 __user * current_dir;
  	int prev_reclen;
  	int count;
-@@ -353,6 +397,9 @@
+@@ -317,6 +362,9 @@
  		sizeof(u64));
  	int prev_reclen;
  
@@ -1598,7 +1599,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	buf->error = verify_dirent_name(name, namlen);
  	if (unlikely(buf->error))
  		return false;
-@@ -402,6 +449,20 @@
+@@ -366,6 +414,20 @@
  	if (!f.file)
  		return -EBADF;
  
@@ -1619,7 +1620,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	error = iterate_dir(f.file, &buf.ctx);
  	if (error >= 0)
  		error = buf.error;
-@@ -415,6 +476,15 @@
+@@ -379,6 +441,15 @@
  		else
  			error = count - buf.count;
  	}
@@ -1635,7 +1636,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	fdput_pos(f);
  	return error;
  }
-@@ -429,6 +499,9 @@
+@@ -393,6 +464,9 @@
  
  struct compat_readdir_callback {
  	struct dir_context ctx;
@@ -1645,7 +1646,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	struct compat_old_linux_dirent __user *dirent;
  	int result;
  };
-@@ -484,10 +557,16 @@
+@@ -448,10 +522,16 @@
  	if (!f.file)
  		return -EBADF;
  
@@ -1662,7 +1663,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	fdput_pos(f);
  	return error;
  }
-@@ -501,6 +580,9 @@
+@@ -465,6 +545,9 @@
  
  struct compat_getdents_callback {
  	struct dir_context ctx;
@@ -1672,7 +1673,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	struct compat_linux_dirent __user *current_dir;
  	int prev_reclen;
  	int count;
-@@ -518,6 +600,9 @@
+@@ -482,6 +565,9 @@
  		namlen + 2, sizeof(compat_long_t));
  	int prev_reclen;
  
@@ -1682,7 +1683,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	buf->error = verify_dirent_name(name, namlen);
  	if (unlikely(buf->error))
  		return false;
-@@ -570,6 +655,9 @@
+@@ -534,6 +620,9 @@
  	if (!f.file)
  		return -EBADF;
  
@@ -1692,7 +1693,7 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	error = iterate_dir(f.file, &buf.ctx);
  	if (error >= 0)
  		error = buf.error;
-@@ -582,6 +670,9 @@
+@@ -546,6 +635,9 @@
  		else
  			error = count - buf.count;
  	}
@@ -1703,9 +1704,9 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	return error;
  }
 diff -ruN src_origin/fs/stat.c src_modified/fs/stat.c
---- src_origin/fs/stat.c	2025-12-13 16:03:28.270936518 +0800
-+++ src_modified/fs/stat.c	2025-12-14 19:28:34.289939620 +0800
-@@ -25,6 +25,9 @@
+--- src_origin/fs/stat.c	2025-12-15 11:12:29.916146004 +0800
++++ src_modified/fs/stat.c	2025-12-15 14:20:18.900589349 +0800
+@@ -24,6 +24,9 @@
  
  #include "internal.h"
  #include "mount.h"
@@ -1715,10 +1716,10 @@ diff -ruN src_origin/fs/stat.c src_modified/fs/stat.c
  
  /**
   * generic_fillattr - Fill in the basic attributes from the inode struct
-@@ -131,12 +134,26 @@
+@@ -120,11 +123,25 @@
  				  STATX_ATTR_DAX);
  
- 	idmap = mnt_idmap(path->mnt);
+ 	mnt_userns = mnt_user_ns(path->mnt);
 +#ifdef CONFIG_HYMOFS
 +	if (inode->i_op->getattr) {
 +		int ret = inode->i_op->getattr(idmap, path, stat,
@@ -1729,12 +1730,11 @@ diff -ruN src_origin/fs/stat.c src_modified/fs/stat.c
 +    }
 +#else
  	if (inode->i_op->getattr)
- 		return inode->i_op->getattr(idmap, path, stat,
- 					    request_mask,
- 					    query_flags | AT_GETATTR_NOSEC);
+ 		return inode->i_op->getattr(mnt_userns, path, stat,
+ 					    request_mask, query_flags);
 +#endif
  
- 	generic_fillattr(idmap, request_mask, inode, stat);
+ 	generic_fillattr(mnt_userns, inode, stat);
 +#ifdef CONFIG_HYMOFS
 +	/* HymoFS: Spoof timestamps if needed */
 +	hymofs_spoof_stat(path, stat);
@@ -1743,9 +1743,9 @@ diff -ruN src_origin/fs/stat.c src_modified/fs/stat.c
  }
  EXPORT_SYMBOL(vfs_getattr_nosec);
 diff -ruN src_origin/fs/xattr.c src_modified/fs/xattr.c
---- src_origin/fs/xattr.c	2025-12-15 05:58:54.258238669 +0800
-+++ src_modified/fs/xattr.c	2025-12-15 13:40:47.299728830 +0800
-@@ -25,6 +25,9 @@
+--- src_origin/fs/xattr.c	2025-12-15 11:12:29.927995725 +0800
++++ src_modified/fs/xattr.c	2025-12-15 14:22:14.714686284 +0800
+@@ -24,6 +24,9 @@
  #include <linux/posix_acl_xattr.h>
  
  #include <linux/uaccess.h>
@@ -1755,7 +1755,7 @@ diff -ruN src_origin/fs/xattr.c src_modified/fs/xattr.c
  
  #include "internal.h"
  
-@@ -725,6 +728,10 @@
+@@ -688,6 +691,10 @@
  {
  	ssize_t error;
  	char *kname = ctx->kname->name;
@@ -1766,7 +1766,7 @@ diff -ruN src_origin/fs/xattr.c src_modified/fs/xattr.c
  
  	if (ctx->size) {
  		if (ctx->size > XATTR_SIZE_MAX)
-@@ -831,6 +838,35 @@
+@@ -793,6 +800,35 @@
  	ssize_t error;
  	char *klist = NULL;
  
@@ -1802,7 +1802,7 @@ diff -ruN src_origin/fs/xattr.c src_modified/fs/xattr.c
  	if (size) {
  		if (size > XATTR_LIST_MAX)
  			size = XATTR_LIST_MAX;
-@@ -848,6 +884,7 @@
+@@ -810,6 +846,7 @@
  		   than XATTR_LIST_MAX bytes. Not possible. */
  		error = -E2BIG;
  	}

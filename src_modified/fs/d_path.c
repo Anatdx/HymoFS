@@ -7,7 +7,6 @@
 #include <linux/slab.h>
 #include <linux/prefetch.h>
 #include "mount.h"
-#include "internal.h"
 #ifdef CONFIG_HYMOFS
 #include "hymofs.h"
 #endif

@@ -168,18 +168,12 @@ static void hymofs_reorder_mnt_id(void)
             // Hide it by assigning a high ID (susfs compatible)
             // 500000 is DEFAULT_KSU_MNT_ID
             if (m->mnt_id < 500000) {
-#ifdef CONFIG_KSU_SUSFS
-                WRITE_ONCE(m->mnt.susfs_mnt_id_backup, m->mnt_id);
-#endif
                 WRITE_ONCE(m->mnt_id, 500000 + (id % 1000)); // Use a range
             }
         } else {
             // Skip if already hidden (by susfs or us)
             if (m->mnt_id >= 500000) continue;
             
-#ifdef CONFIG_KSU_SUSFS
-            WRITE_ONCE(m->mnt.susfs_mnt_id_backup, m->mnt_id);
-#endif
             WRITE_ONCE(m->mnt_id, id++);
         }
     }
@@ -938,13 +932,6 @@ bool __hymofs_check_filldir(struct hymo_readdir_context *ctx, const char *name, 
     return ret;
 }
 EXPORT_SYMBOL(__hymofs_check_filldir);
-
-struct linux_dirent {
-	unsigned long	d_ino;
-	unsigned long	d_off;
-	unsigned short	d_reclen;
-	char		d_name[];
-};
 
 /* Inject virtual entries into getdents system call */
 int hymofs_inject_entries(struct hymo_readdir_context *ctx, void __user **dir_ptr, int *count, loff_t *pos)

@@ -6,11 +6,6 @@
 # Rewritten to use lists instead of if-statements.
 # 
 
-ifdef CONFIG_GKI_HACKS_TO_FIX
-subdir-ccflags-y += -DANDROID_GKI_VFS_EXPORT_ONLY=VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver
-else
-subdir-ccflags-y += -DANDROID_GKI_VFS_EXPORT_ONLY=""
-endif
 
 obj-y :=	open.o read_write.o file_table.o super.o \
 		char_dev.o stat.o exec.o pipe.o namei.o fcntl.o \
@@ -20,14 +15,22 @@ obj-y :=	open.o read_write.o file_table.o super.o \
 		pnode.o splice.o sync.o utimes.o d_path.o \
 		stack.o fs_struct.o statfs.o fs_pin.o nsfs.o \
 		fs_types.o fs_context.o fs_parser.o fsopen.o init.o \
-		kernel_read_file.o mnt_idmapping.o remap_range.o
+		kernel_read_file.o remap_range.o
 
-obj-$(CONFIG_KSU_SUSFS) += susfs.o
 obj-$(CONFIG_HYMOFS) += hymofs.o
 
-obj-$(CONFIG_BUFFER_HEAD)	+= buffer.o mpage.o
-obj-$(CONFIG_PROC_FS)		+= proc_namespace.o
-obj-$(CONFIG_LEGACY_DIRECT_IO)	+= direct-io.o
+PGO_PROFILE_xattr.o := n
+
+obj-$(CONFIG_KSU_SUSFS) += susfs.o
+
+ifeq ($(CONFIG_BLOCK),y)
+obj-y +=	buffer.o direct-io.o mpage.o
+else
+obj-y +=	no-block.o
+endif
+
+obj-$(CONFIG_PROC_FS) += proc_namespace.o
+
 obj-y				+= notify/
 obj-$(CONFIG_EPOLL)		+= eventpoll.o
 obj-y				+= anon_inodes.o
@@ -124,7 +127,7 @@ obj-$(CONFIG_9P_FS)		+= 9p/
 obj-$(CONFIG_AFS_FS)		+= afs/
 obj-$(CONFIG_NILFS2_FS)		+= nilfs2/
 obj-$(CONFIG_BEFS_FS)		+= befs/
-obj-y				+= hostfs/
+obj-$(CONFIG_HOSTFS)		+= hostfs/
 obj-$(CONFIG_CACHEFILES)	+= cachefiles/
 obj-$(CONFIG_DEBUG_FS)		+= debugfs/
 obj-$(CONFIG_TRACING)		+= tracefs/

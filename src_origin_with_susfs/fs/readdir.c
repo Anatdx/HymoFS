@@ -26,59 +26,12 @@
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 #include <linux/susfs_def.h>
-extern bool susfs_is_inode_sus_path(struct mnt_idmap *idmap, struct inode *inode);
+extern bool susfs_is_inode_sus_path(struct inode *inode);
 extern bool susfs_is_sus_android_data_d_name_found(const char *d_name);
 extern bool susfs_is_sus_sdcard_d_name_found(const char *d_name);
 extern bool susfs_is_base_dentry_android_data_dir(struct dentry* base);
 extern bool susfs_is_base_dentry_sdcard_dir(struct dentry* base);
 #endif
-/*
- * Some filesystems were never converted to '->iterate_shared()'
- * and their directory iterators want the inode lock held for
- * writing. This wrapper allows for converting from the shared
- * semantics to the exclusive inode use.
- */
-int wrap_directory_iterator(struct file *file,
-			    struct dir_context *ctx,
-			    int (*iter)(struct file *, struct dir_context *))
-{
-	struct inode *inode = file_inode(file);
-	int ret;
-
-	/*
-	 * We'd love to have an 'inode_upgrade_trylock()' operation,
-	 * see the comment in mmap_upgrade_trylock() in mm/memory.c.
-	 *
-	 * But considering this is for "filesystems that never got
-	 * converted", it really doesn't matter.
-	 *
-	 * Also note that since we have to return with the lock held
-	 * for reading, we can't use the "killable()" locking here,
-	 * since we do need to get the lock even if we're dying.
-	 *
-	 * We could do the write part killably and then get the read
-	 * lock unconditionally if it mattered, but see above on why
-	 * this does the very simplistic conversion.
-	 */
-	up_read(&inode->i_rwsem);
-	down_write(&inode->i_rwsem);
-
-	/*
-	 * Since we dropped the inode lock, we should do the
-	 * DEADDIR test again. See 'iterate_dir()' below.
-	 *
-	 * Note that we don't need to re-do the f_pos games,
-	 * since the file must be locked wrt f_pos anyway.
-	 */
-	ret = -ENOENT;
-	if (!IS_DEADDIR(inode))
-		ret = iter(file, ctx);
-
-	downgrade_write(&inode->i_rwsem);
-	return ret;
-}
-EXPORT_SYMBOL(wrap_directory_iterator);
-
 /*
  * Note the "unsafe_put_user() semantics: we goto a
  * label for errors.
@@ -95,28 +48,39 @@ EXPORT_SYMBOL(wrap_directory_iterator);
 int iterate_dir(struct file *file, struct dir_context *ctx)
 {
 	struct inode *inode = file_inode(file);
+	bool shared = false;
 	int res = -ENOTDIR;
-
-	if (!file->f_op->iterate_shared)
+	if (file->f_op->iterate_shared)
+		shared = true;
+	else if (!file->f_op->iterate)
 		goto out;
 
 	res = security_file_permission(file, MAY_READ);
 	if (res)
 		goto out;
 
-	res = down_read_killable(&inode->i_rwsem);
+	if (shared)
+		res = down_read_killable(&inode->i_rwsem);
+	else
+		res = down_write_killable(&inode->i_rwsem);
 	if (res)
 		goto out;
 
 	res = -ENOENT;
 	if (!IS_DEADDIR(inode)) {
 		ctx->pos = file->f_pos;
-		res = file->f_op->iterate_shared(file, ctx);
+		if (shared)
+			res = file->f_op->iterate_shared(file, ctx);
+		else
+			res = file->f_op->iterate(file, ctx);
 		file->f_pos = ctx->pos;
 		fsnotify_access(file);
 		file_accessed(file);
 	}
-	inode_unlock_shared(inode);
+	if (shared)
+		inode_unlock_shared(inode);
+	else
+		inode_unlock(inode);
 out:
 	return res;
 }
@@ -175,7 +139,7 @@ struct old_linux_dirent {
 	unsigned long	d_ino;
 	unsigned long	d_offset;
 	unsigned short	d_namlen;
-	char		d_name[];
+	char		d_name[1];
 };
 
 struct readdir_callback {
@@ -183,7 +147,6 @@ struct readdir_callback {
 	struct old_linux_dirent __user * dirent;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct super_block *sb;
-	struct mnt_idmap *idmap;
 	bool is_base_dentry_android_data_root_dir;
 	bool is_base_dentry_sdcard_root_dir;
 #endif
@@ -226,7 +189,7 @@ static bool fillonedir(struct dir_context *ctx, const char *name, int namlen,
 	if (!inode) {
 		goto orig_flow;
 	}
-	if (susfs_is_inode_sus_path(buf->idmap, inode)) {
+	if (susfs_is_inode_sus_path(inode)) {
 		iput(inode);
 		return true;
 	}
@@ -288,7 +251,6 @@ SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	buf.is_base_dentry_android_data_root_dir = false;
 	buf.is_base_dentry_sdcard_root_dir = false;
 orig_flow:
-	buf.idmap = mnt_idmap(f.file->f_path.mnt);
 #endif
 	error = iterate_dir(f.file, &buf.ctx);
 	if (buf.result)
@@ -308,7 +270,7 @@ struct linux_dirent {
 	unsigned long	d_ino;
 	unsigned long	d_off;
 	unsigned short	d_reclen;
-	char		d_name[];
+	char		d_name[1];
 };
 
 struct getdents_callback {
@@ -316,7 +278,6 @@ struct getdents_callback {
 	struct linux_dirent __user * current_dir;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct super_block *sb;
-	struct mnt_idmap *idmap;
 	bool is_base_dentry_android_data_root_dir;
 	bool is_base_dentry_sdcard_root_dir;
 #endif
@@ -369,7 +330,7 @@ static bool filldir(struct dir_context *ctx, const char *name, int namlen,
 	if (!inode) {
 		goto orig_flow;
 	}
-	if (susfs_is_inode_sus_path(buf->idmap, inode)) {
+	if (susfs_is_inode_sus_path(inode)) {
 		iput(inode);
 		return true;
 	}
@@ -438,7 +399,6 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	buf.is_base_dentry_android_data_root_dir = false;
 	buf.is_base_dentry_sdcard_root_dir = false;
 orig_flow:
-	buf.idmap = mnt_idmap(f.file->f_path.mnt);
 #endif
 	error = iterate_dir(f.file, &buf.ctx);
 	if (error >= 0)
@@ -461,7 +421,6 @@ struct getdents_callback64 {
 	struct linux_dirent64 __user * current_dir;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct super_block *sb;
-	struct mnt_idmap *idmap;
 	bool is_base_dentry_android_data_root_dir;
 	bool is_base_dentry_sdcard_root_dir;
 #endif
@@ -508,7 +467,7 @@ static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
 	if (!inode) {
 		goto orig_flow;
 	}
-	if (susfs_is_inode_sus_path(buf->idmap, inode)) {
+	if (susfs_is_inode_sus_path(inode)) {
 		iput(inode);
 		return true;
 	}
@@ -578,7 +537,6 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
 	buf.is_base_dentry_android_data_root_dir = false;
 	buf.is_base_dentry_sdcard_root_dir = false;
 orig_flow:
-	buf.idmap = mnt_idmap(f.file->f_path.mnt);
 #endif
 	error = iterate_dir(f.file, &buf.ctx);
 	if (error >= 0)
@@ -602,7 +560,7 @@ struct compat_old_linux_dirent {
 	compat_ulong_t	d_ino;
 	compat_ulong_t	d_offset;
 	unsigned short	d_namlen;
-	char		d_name[];
+	char		d_name[1];
 };
 
 struct compat_readdir_callback {
@@ -610,7 +568,6 @@ struct compat_readdir_callback {
 	struct compat_old_linux_dirent __user *dirent;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct super_block *sb;
-	struct mnt_idmap *idmap;
 	bool is_base_dentry_android_data_root_dir;
 	bool is_base_dentry_sdcard_root_dir;
 #endif
@@ -654,7 +611,7 @@ static bool compat_fillonedir(struct dir_context *ctx, const char *name,
 	if (!inode) {
 		goto orig_flow;
 	}
-	if (susfs_is_inode_sus_path(buf->idmap, inode)) {
+	if (susfs_is_inode_sus_path(inode)) {
 		iput(inode);
 		return true;
 	}
@@ -716,7 +673,6 @@ COMPAT_SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	buf.is_base_dentry_android_data_root_dir = false;
 	buf.is_base_dentry_sdcard_root_dir = false;
 orig_flow:
-	buf.idmap = mnt_idmap(f.file->f_path.mnt);
 #endif
 	error = iterate_dir(f.file, &buf.ctx);
 	if (buf.result)
@@ -730,7 +686,7 @@ struct compat_linux_dirent {
 	compat_ulong_t	d_ino;
 	compat_ulong_t	d_off;
 	unsigned short	d_reclen;
-	char		d_name[];
+	char		d_name[1];
 };
 
 struct compat_getdents_callback {
@@ -738,7 +694,6 @@ struct compat_getdents_callback {
 	struct compat_linux_dirent __user *current_dir;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct super_block *sb;
-	struct mnt_idmap *idmap;
 	bool is_base_dentry_android_data_root_dir;
 	bool is_base_dentry_sdcard_root_dir;
 #endif
@@ -790,7 +745,7 @@ static bool compat_filldir(struct dir_context *ctx, const char *name, int namlen
 	if (!inode) {
 		goto orig_flow;
 	}
-	if (susfs_is_inode_sus_path(buf->idmap, inode)) {
+	if (susfs_is_inode_sus_path(inode)) {
 		iput(inode);
 		return true;
 	}
@@ -858,7 +813,6 @@ COMPAT_SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	buf.is_base_dentry_android_data_root_dir = false;
 	buf.is_base_dentry_sdcard_root_dir = false;
 orig_flow:
-	buf.idmap = mnt_idmap(f.file->f_path.mnt);
 #endif
 	error = iterate_dir(f.file, &buf.ctx);
 	if (error >= 0)
