@@ -1,6 +1,6 @@
 diff -ruN src_origin_with_susfs/fs/d_path.c src_modified_with_susfs/fs/d_path.c
---- src_origin_with_susfs/fs/d_path.c	2025-12-14 19:28:34.291760551 +0800
-+++ src_modified_with_susfs/fs/d_path.c	2025-12-14 19:28:34.290086775 +0800
+--- src_origin_with_susfs/fs/d_path.c	2025-12-15 18:41:57.766680780 +0800
++++ src_modified_with_susfs/fs/d_path.c	2025-12-15 18:41:57.763680813 +0800
 @@ -8,6 +8,9 @@
  #include <linux/prefetch.h>
  #include "mount.h"
@@ -40,8 +40,8 @@ diff -ruN src_origin_with_susfs/fs/d_path.c src_modified_with_susfs/fs/d_path.c
  
 diff -ruN src_origin_with_susfs/fs/hymofs.c src_modified_with_susfs/fs/hymofs.c
 --- src_origin_with_susfs/fs/hymofs.c	1970-01-01 08:00:00.000000000 +0800
-+++ src_modified_with_susfs/fs/hymofs.c	2025-12-15 13:33:18.673324360 +0800
-@@ -0,0 +1,1224 @@
++++ src_modified_with_susfs/fs/hymofs.c	2025-12-16 18:22:13.828491859 +0800
+@@ -0,0 +1,1253 @@
 +#include <linux/string.h>
 +#include <linux/mm.h>
 +#include <linux/file.h>
@@ -306,7 +306,7 @@ diff -ruN src_origin_with_susfs/fs/hymofs.c src_modified_with_susfs/fs/hymofs.c
 +        int val;
 +        if (copy_from_user(&val, (void __user *)arg, sizeof(val))) return -EFAULT;
 +        hymo_debug_enabled = !!val;
-+        printk(KERN_INFO "hymofs: debug mode %s\n", hymo_debug_enabled ? "enabled" : "disabled");
++        hymo_log("debug mode %s\n", hymo_debug_enabled ? "enabled" : "disabled");
 +        return 0;
 +    }
 +
@@ -320,7 +320,7 @@ diff -ruN src_origin_with_susfs/fs/hymofs.c src_modified_with_susfs/fs/hymofs.c
 +        int val;
 +        if (copy_from_user(&val, (void __user *)arg, sizeof(val))) return -EFAULT;
 +        hymo_stealth_enabled = !!val;
-+        printk(KERN_INFO "hymofs: stealth mode %s\n", hymo_stealth_enabled ? "enabled" : "disabled");
++        hymo_log("stealth mode %s\n", hymo_stealth_enabled ? "enabled" : "disabled");
 +        if (hymo_stealth_enabled) {
 +            hymofs_spoof_mounts();
 +            hymofs_reorder_mnt_id();
@@ -873,11 +873,33 @@ diff -ruN src_origin_with_susfs/fs/hymofs.c src_modified_with_susfs/fs/hymofs.c
 +    spin_lock_irqsave(&hymo_lock, flags);
 +    
 +    hash_for_each_possible(hymo_inject_dirs, inject_entry, node, hash) {
++        hymo_log("DEBUG: checking inject rule %s against %s\n", inject_entry->dir, dir_path);
++        if (hymo_debug_enabled) {
++            print_hex_dump(KERN_INFO, "hymofs: rule: ", DUMP_PREFIX_NONE, 16, 1, inject_entry->dir, strlen(inject_entry->dir), true);
++            print_hex_dump(KERN_INFO, "hymofs: path: ", DUMP_PREFIX_NONE, 16, 1, dir_path, strlen(dir_path), true);
++        }
++        
 +        if (strcmp(inject_entry->dir, dir_path) == 0) {
 +            should_inject = true;
 +            break;
 +        }
++        
++        // Try matching with/without trailing slash
++        size_t rule_len = strlen(inject_entry->dir);
++        size_t path_len = strlen(dir_path);
++        if (rule_len == path_len + 1 && inject_entry->dir[path_len] == '/' && strncmp(inject_entry->dir, dir_path, path_len) == 0) {
++             should_inject = true;
++             break;
++        }
++        if (path_len == rule_len + 1 && dir_path[rule_len] == '/' && strncmp(inject_entry->dir, dir_path, rule_len) == 0) {
++             should_inject = true;
++             break;
++        }
 +    }
++    if (!should_inject) {
++         hymo_log("DEBUG: no inject rule found for %s\n", dir_path);
++    }
++
 +    if (should_inject) {
 +        hymo_log("injecting entries for %s\n", dir_path);
 +        hash_for_each(hymo_paths, bkt, entry, node) {
@@ -948,6 +970,7 @@ diff -ruN src_origin_with_susfs/fs/hymofs.c src_modified_with_susfs/fs/hymofs.c
 +            memmove(ctx->path_buf, p, len + 1);
 +            ctx->dir_path = ctx->path_buf;
 +            ctx->dir_path_len = len;
++            hymo_log("readdir prepare: %s\n", ctx->dir_path);
 +        } else {
 +            free_page((unsigned long)ctx->path_buf);
 +            ctx->path_buf = NULL;
@@ -972,8 +995,14 @@ diff -ruN src_origin_with_susfs/fs/hymofs.c src_modified_with_susfs/fs/hymofs.c
 +            memcpy(p, name, namlen);
 +            p[namlen] = '\0';
 +            
-+            if (hymofs_should_hide(ctx->path_buf)) ret = true;
-+            else if (__hymofs_should_replace(ctx->path_buf)) ret = true;
++            if (hymofs_should_hide(ctx->path_buf)) {
++                hymo_log("hiding %s\n", ctx->path_buf);
++                ret = true;
++            }
++            else if (__hymofs_should_replace(ctx->path_buf)) {
++                hymo_log("hiding (replace source) %s\n", ctx->path_buf);
++                ret = true;
++            }
 +
 +            /* Restore path buffer to directory path for next iteration */
 +            ctx->path_buf[ctx->dir_path_len] = '\0';
@@ -1268,7 +1297,7 @@ diff -ruN src_origin_with_susfs/fs/hymofs.c src_modified_with_susfs/fs/hymofs.c
 +#endif /* CONFIG_HYMOFS */
 diff -ruN src_origin_with_susfs/fs/hymofs.h src_modified_with_susfs/fs/hymofs.h
 --- src_origin_with_susfs/fs/hymofs.h	1970-01-01 08:00:00.000000000 +0800
-+++ src_modified_with_susfs/fs/hymofs.h	2025-12-15 09:01:30.834608967 +0800
++++ src_modified_with_susfs/fs/hymofs.h	2025-12-15 18:41:57.763680813 +0800
 @@ -0,0 +1,115 @@
 +#ifndef _LINUX_HYMOFS_H
 +#define _LINUX_HYMOFS_H
@@ -1387,7 +1416,7 @@ diff -ruN src_origin_with_susfs/fs/hymofs.h src_modified_with_susfs/fs/hymofs.h
 +#endif /* _LINUX_HYMOFS_H */
 diff -ruN src_origin_with_susfs/fs/hymofs_ioctl.h src_modified_with_susfs/fs/hymofs_ioctl.h
 --- src_origin_with_susfs/fs/hymofs_ioctl.h	1970-01-01 08:00:00.000000000 +0800
-+++ src_modified_with_susfs/fs/hymofs_ioctl.h	2025-12-15 09:01:30.834608967 +0800
++++ src_modified_with_susfs/fs/hymofs_ioctl.h	2025-12-15 14:37:25.110094092 +0800
 @@ -0,0 +1,36 @@
 +#ifndef _HYMOFS_IOCTL_H
 +#define _HYMOFS_IOCTL_H
@@ -1426,8 +1455,8 @@ diff -ruN src_origin_with_susfs/fs/hymofs_ioctl.h src_modified_with_susfs/fs/hym
 +
 +#endif
 diff -ruN src_origin_with_susfs/fs/Kconfig src_modified_with_susfs/fs/Kconfig
---- src_origin_with_susfs/fs/Kconfig	2025-12-14 14:33:43.135241001 +0800
-+++ src_modified_with_susfs/fs/Kconfig	2025-12-12 17:32:32.095494376 +0800
+--- src_origin_with_susfs/fs/Kconfig	2025-12-15 18:41:57.766680780 +0800
++++ src_modified_with_susfs/fs/Kconfig	2025-12-15 18:41:57.763680813 +0800
 @@ -405,4 +405,10 @@
  config IO_WQ
  	bool
@@ -1440,8 +1469,8 @@ diff -ruN src_origin_with_susfs/fs/Kconfig src_modified_with_susfs/fs/Kconfig
 +
  endmenu
 diff -ruN src_origin_with_susfs/fs/Makefile src_modified_with_susfs/fs/Makefile
---- src_origin_with_susfs/fs/Makefile	2025-12-14 14:33:57.626665023 +0800
-+++ src_modified_with_susfs/fs/Makefile	2025-12-12 17:32:32.095604703 +0800
+--- src_origin_with_susfs/fs/Makefile	2025-12-15 18:41:57.766680780 +0800
++++ src_modified_with_susfs/fs/Makefile	2025-12-15 18:41:57.763680813 +0800
 @@ -23,6 +23,7 @@
  		kernel_read_file.o mnt_idmapping.o remap_range.o
  
@@ -1451,8 +1480,8 @@ diff -ruN src_origin_with_susfs/fs/Makefile src_modified_with_susfs/fs/Makefile
  obj-$(CONFIG_BUFFER_HEAD)	+= buffer.o mpage.o
  obj-$(CONFIG_PROC_FS)		+= proc_namespace.o
 diff -ruN src_origin_with_susfs/fs/namei.c src_modified_with_susfs/fs/namei.c
---- src_origin_with_susfs/fs/namei.c	2025-12-14 14:33:57.627280854 +0800
-+++ src_modified_with_susfs/fs/namei.c	2025-12-14 19:28:34.291244372 +0800
+--- src_origin_with_susfs/fs/namei.c	2025-12-15 18:41:57.767680769 +0800
++++ src_modified_with_susfs/fs/namei.c	2025-12-15 18:41:57.764680802 +0800
 @@ -57,6 +57,10 @@
  extern const struct qstr susfs_fake_qstr_name;
  #endif
@@ -1488,8 +1517,8 @@ diff -ruN src_origin_with_susfs/fs/namei.c src_modified_with_susfs/fs/namei.c
  	struct filename *result;
  	char *kname;
 diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.c
---- src_origin_with_susfs/fs/readdir.c	2025-12-14 14:33:57.629832923 +0800
-+++ src_modified_with_susfs/fs/readdir.c	2025-12-12 17:32:32.095762827 +0800
+--- src_origin_with_susfs/fs/readdir.c	2025-12-15 18:41:57.767680769 +0800
++++ src_modified_with_susfs/fs/readdir.c	2025-12-16 17:45:20.527413376 +0800
 @@ -32,6 +32,11 @@
  extern bool susfs_is_base_dentry_android_data_dir(struct dentry* base);
  extern bool susfs_is_base_dentry_sdcard_dir(struct dentry* base);
@@ -1542,7 +1571,17 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  	struct linux_dirent __user * current_dir;
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	struct super_block *sb;
-@@ -335,7 +352,13 @@
+@@ -323,6 +340,9 @@
+ 	int prev_reclen;
+ 	int count;
+ 	int error;
++#ifdef CONFIG_HYMOFS
++	bool buffer_full;
++#endif
+ };
+ 
+ static bool filldir(struct dir_context *ctx, const char *name, int namlen,
+@@ -335,7 +355,13 @@
  	int reclen = ALIGN(offsetof(struct linux_dirent, d_name) + namlen + 2,
  		sizeof(long));
  	int prev_reclen;
@@ -1556,7 +1595,31 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  	struct inode *inode;
  #endif
  
-@@ -417,6 +440,20 @@
+@@ -343,8 +369,12 @@
+ 	if (unlikely(buf->error))
+ 		return false;
+ 	buf->error = -EINVAL;	/* only used if we fail.. */
+-	if (reclen > buf->count)
++	if (reclen > buf->count) {
++#ifdef CONFIG_HYMOFS
++		buf->buffer_full = true;
++#endif
+ 		return false;
++	}
+ 	d_ino = ino;
+ 	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino) {
+ 		buf->error = -EOVERFLOW;
+@@ -408,6 +438,9 @@
+ 		.ctx.actor = filldir,
+ 		.count = count,
+ 		.current_dir = dirent
++#ifdef CONFIG_HYMOFS
++		, .buffer_full = false
++#endif
+ 	};
+ 	int error;
+ #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+@@ -417,6 +450,20 @@
  	f = fdget_pos(fd);
  	if (!f.file)
  		return -EBADF;
@@ -1577,12 +1640,12 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	buf.sb = f.file->f_inode->i_sb;
-@@ -452,12 +489,24 @@
+@@ -452,12 +499,24 @@
  		else
  			error = count - buf.count;
  	}
 +#ifdef CONFIG_HYMOFS
-+	if (error >= 0) {
++	if (error >= 0 && !buf.buffer_full && buf.ctx.pos < HYMO_MAGIC_POS && !signal_pending(current) && buf.count == count) {
 +		void __user *dir_ptr = buf.current_dir;
 +		int res = hymofs_inject_entries(&buf.hymo, &dir_ptr, &buf.count, &f.file->f_pos);
 +		if (res > 0)
@@ -1602,7 +1665,17 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  	struct linux_dirent64 __user * current_dir;
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	struct super_block *sb;
-@@ -479,6 +528,11 @@
+@@ -468,6 +527,9 @@
+ 	int prev_reclen;
+ 	int count;
+ 	int error;
++#ifdef CONFIG_HYMOFS
++	bool buffer_full;
++#endif
+ };
+ 
+ static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
+@@ -479,6 +541,11 @@
  	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
  		sizeof(u64));
  	int prev_reclen;
@@ -1614,7 +1687,31 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	struct inode *inode;
  #endif
-@@ -558,6 +612,21 @@
+@@ -487,8 +554,12 @@
+ 	if (unlikely(buf->error))
+ 		return false;
+ 	buf->error = -EINVAL;	/* only used if we fail.. */
+-	if (reclen > buf->count)
++	if (reclen > buf->count) {
++#ifdef CONFIG_HYMOFS
++		buf->buffer_full = true;
++#endif
+ 		return false;
++	}
+ 	prev_reclen = buf->prev_reclen;
+ 	if (prev_reclen && signal_pending(current))
+ 		return false;
+@@ -548,6 +619,9 @@
+ 		.ctx.actor = filldir64,
+ 		.count = count,
+ 		.current_dir = dirent
++#ifdef CONFIG_HYMOFS
++		, .buffer_full = false
++#endif
+ 	};
+ 	int error;
+ #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+@@ -558,6 +632,21 @@
  	if (!f.file)
  		return -EBADF;
  
@@ -1636,12 +1733,12 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	buf.sb = f.file->f_inode->i_sb;
  	inode = f.file->f_path.dentry->d_inode;
-@@ -593,6 +662,15 @@
+@@ -593,6 +682,15 @@
  		else
  			error = count - buf.count;
  	}
 +#ifdef CONFIG_HYMOFS
-+	if (error >= 0) {
++	if (error >= 0 && !buf.buffer_full && buf.ctx.pos < HYMO_MAGIC_POS && !signal_pending(current) && buf.count == count) {
 +		void __user *dir_ptr = buf.current_dir;
 +		int res = hymofs_inject_entries64(&buf.hymo, &dir_ptr, &buf.count, &f.file->f_pos);
 +		if (res > 0)
@@ -1652,7 +1749,7 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  	fdput_pos(f);
  	return error;
  }
-@@ -607,6 +685,9 @@
+@@ -607,6 +705,9 @@
  
  struct compat_readdir_callback {
  	struct dir_context ctx;
@@ -1662,7 +1759,7 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  	struct compat_old_linux_dirent __user *dirent;
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	struct super_block *sb;
-@@ -696,6 +777,10 @@
+@@ -696,6 +797,10 @@
  	if (!f.file)
  		return -EBADF;
  
@@ -1673,7 +1770,7 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	buf.sb = f.file->f_inode->i_sb;
  	inode = f.file->f_path.dentry->d_inode;
-@@ -722,6 +807,9 @@
+@@ -722,6 +827,9 @@
  	if (buf.result)
  		error = buf.result;
  
@@ -1683,7 +1780,7 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  	fdput_pos(f);
  	return error;
  }
-@@ -735,6 +823,9 @@
+@@ -735,6 +843,9 @@
  
  struct compat_getdents_callback {
  	struct dir_context ctx;
@@ -1693,7 +1790,7 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  	struct compat_linux_dirent __user *current_dir;
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	struct super_block *sb;
-@@ -757,6 +848,10 @@
+@@ -757,6 +868,10 @@
  	int reclen = ALIGN(offsetof(struct compat_linux_dirent, d_name) +
  		namlen + 2, sizeof(compat_long_t));
  	int prev_reclen;
@@ -1704,7 +1801,7 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	struct inode *inode;
  #endif
-@@ -838,6 +933,10 @@
+@@ -838,6 +953,10 @@
  	if (!f.file)
  		return -EBADF;
  
@@ -1715,7 +1812,7 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	buf.sb = f.file->f_inode->i_sb;
  	inode = f.file->f_path.dentry->d_inode;
-@@ -872,6 +971,9 @@
+@@ -872,6 +991,9 @@
  		else
  			error = count - buf.count;
  	}
@@ -1726,8 +1823,8 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  	return error;
  }
 diff -ruN src_origin_with_susfs/fs/stat.c src_modified_with_susfs/fs/stat.c
---- src_origin_with_susfs/fs/stat.c	2025-12-14 14:36:15.071987575 +0800
-+++ src_modified_with_susfs/fs/stat.c	2025-12-14 19:28:34.291487801 +0800
+--- src_origin_with_susfs/fs/stat.c	2025-12-15 18:41:57.767680769 +0800
++++ src_modified_with_susfs/fs/stat.c	2025-12-15 18:41:57.764680802 +0800
 @@ -34,6 +34,10 @@
  extern void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
  #endif
@@ -1767,8 +1864,8 @@ diff -ruN src_origin_with_susfs/fs/stat.c src_modified_with_susfs/fs/stat.c
  }
  EXPORT_SYMBOL(vfs_getattr_nosec);
 diff -ruN src_origin_with_susfs/fs/xattr.c src_modified_with_susfs/fs/xattr.c
---- src_origin_with_susfs/fs/xattr.c	2025-12-15 06:24:47.725099228 +0800
-+++ src_modified_with_susfs/fs/xattr.c	2025-12-15 09:01:30.834608967 +0800
+--- src_origin_with_susfs/fs/xattr.c	2025-12-15 18:41:57.767680769 +0800
++++ src_modified_with_susfs/fs/xattr.c	2025-12-15 18:41:57.764680802 +0800
 @@ -25,6 +25,9 @@
  #include <linux/posix_acl_xattr.h>
  

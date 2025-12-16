@@ -256,7 +256,7 @@ static long hymo_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
         int val;
         if (copy_from_user(&val, (void __user *)arg, sizeof(val))) return -EFAULT;
         hymo_debug_enabled = !!val;
-        printk(KERN_INFO "hymofs: debug mode %s\n", hymo_debug_enabled ? "enabled" : "disabled");
+        hymo_log("debug mode %s\n", hymo_debug_enabled ? "enabled" : "disabled");
         return 0;
     }
 
@@ -270,7 +270,7 @@ static long hymo_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
         int val;
         if (copy_from_user(&val, (void __user *)arg, sizeof(val))) return -EFAULT;
         hymo_stealth_enabled = !!val;
-        printk(KERN_INFO "hymofs: stealth mode %s\n", hymo_stealth_enabled ? "enabled" : "disabled");
+        hymo_log("stealth mode %s\n", hymo_stealth_enabled ? "enabled" : "disabled");
         if (hymo_stealth_enabled) {
             hymofs_spoof_mounts();
             hymofs_reorder_mnt_id();
@@ -823,11 +823,33 @@ int hymofs_populate_injected_list(const char *dir_path, struct dentry *parent, s
     spin_lock_irqsave(&hymo_lock, flags);
     
     hash_for_each_possible(hymo_inject_dirs, inject_entry, node, hash) {
+        hymo_log("DEBUG: checking inject rule %s against %s\n", inject_entry->dir, dir_path);
+        if (hymo_debug_enabled) {
+            print_hex_dump(KERN_INFO, "hymofs: rule: ", DUMP_PREFIX_NONE, 16, 1, inject_entry->dir, strlen(inject_entry->dir), true);
+            print_hex_dump(KERN_INFO, "hymofs: path: ", DUMP_PREFIX_NONE, 16, 1, dir_path, strlen(dir_path), true);
+        }
+        
         if (strcmp(inject_entry->dir, dir_path) == 0) {
             should_inject = true;
             break;
         }
+        
+        // Try matching with/without trailing slash
+        size_t rule_len = strlen(inject_entry->dir);
+        size_t path_len = strlen(dir_path);
+        if (rule_len == path_len + 1 && inject_entry->dir[path_len] == '/' && strncmp(inject_entry->dir, dir_path, path_len) == 0) {
+             should_inject = true;
+             break;
+        }
+        if (path_len == rule_len + 1 && dir_path[rule_len] == '/' && strncmp(inject_entry->dir, dir_path, rule_len) == 0) {
+             should_inject = true;
+             break;
+        }
     }
+    if (!should_inject) {
+         hymo_log("DEBUG: no inject rule found for %s\n", dir_path);
+    }
+
     if (should_inject) {
         hymo_log("injecting entries for %s\n", dir_path);
         hash_for_each(hymo_paths, bkt, entry, node) {
@@ -898,6 +920,7 @@ void __hymofs_prepare_readdir(struct hymo_readdir_context *ctx, struct file *fil
             memmove(ctx->path_buf, p, len + 1);
             ctx->dir_path = ctx->path_buf;
             ctx->dir_path_len = len;
+            hymo_log("readdir prepare: %s\n", ctx->dir_path);
         } else {
             free_page((unsigned long)ctx->path_buf);
             ctx->path_buf = NULL;
@@ -922,8 +945,14 @@ bool __hymofs_check_filldir(struct hymo_readdir_context *ctx, const char *name, 
             memcpy(p, name, namlen);
             p[namlen] = '\0';
             
-            if (hymofs_should_hide(ctx->path_buf)) ret = true;
-            else if (__hymofs_should_replace(ctx->path_buf)) ret = true;
+            if (hymofs_should_hide(ctx->path_buf)) {
+                hymo_log("hiding %s\n", ctx->path_buf);
+                ret = true;
+            }
+            else if (__hymofs_should_replace(ctx->path_buf)) {
+                hymo_log("hiding (replace source) %s\n", ctx->path_buf);
+                ret = true;
+            }
 
             /* Restore path buffer to directory path for next iteration */
             ctx->path_buf[ctx->dir_path_len] = '\0';
