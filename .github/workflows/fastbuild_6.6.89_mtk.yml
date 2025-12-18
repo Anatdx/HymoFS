@@ -389,6 +389,12 @@ jobs:
           echo "编译后空间:"
           df -h
 
+      - name: "🧠 Set Artifact Name | 设置产物名称"
+        id: set_name
+        run: |
+            echo "ARTIFACT_NAME=Anykernel3_SukiSU_${{ env.KSUVER }}" >> $GITHUB_OUTPUT
+          
+
       - name: 克隆 AnyKernel3 并打包
         run: |
           cd kernel_workspace
@@ -400,8 +406,7 @@ jobs:
             echo "未找到内核镜像文件，构建可能出错"
             exit 1
           fi
-          KSU_TYPENAME="SukiSU"
-          zip -r ../AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_A15_${{ env.KERNEL_NAME }}.zip ./*
+          zip -r ../${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip ./*
 
       - name: Import GPG key
         uses: crazy-max/ghaction-import-gpg@v6
@@ -437,6 +442,18 @@ jobs:
         with:
           name: ccache-debug-log
           path: ${{ github.workspace }}/kernel_workspace/ccache.log
+      
+      - name: "📤 Upload AnyKernel3 | 上传 AnyKernel3"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip
+          path: ./kernel_workspace/${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip
+      
+      - name: "📤 Upload AnyKernel3 | 上传签名"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip.asc
+          path: ./kernel_workspace/${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip.asc
 
       - name: "📤 Upload to telegram | 上传至Telegram群组"
         run: |
@@ -444,22 +461,16 @@ jobs:
             echo "📤 正在上传到Telegram..."
             cd ${{ github.workspace }}
             pip3 install telethon
-            python3 ${{ github.workspace }}/script/buildbot.py "./kernel_workspace/AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_A15_${{ env.KERNEL_NAME }}.zip"
+            python3 ${{ github.workspace }}/script/buildbot.py "./kernel_workspace/${{ steps.set_name.outputs.ARTIFACT_NAME }}.zip"
             echo "✅ 文件已上传到Telegram"
           fi
         env:
           CHATID: ${{secrets.TELEGRAM_CHAT_ID}}
           BOT_TOKEN: ${{secrets.TELEGRAM_BOT_TOKEN}}
-          KernelVer: ${{ env.ANDROID_VERSION}}-${{ env.KERNEL_VERSION }}
+          KernelVer: ${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
           DEVICE: MT6991设备
           KPM: Off
           LZ4KD: Off
           BBR: Off
           KSU_VAR: "SukiSU"
 
-      - name: 上传 ZIP 工件
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel_ZIP_Artifacts
-          path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
-      
