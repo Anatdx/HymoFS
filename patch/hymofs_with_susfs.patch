@@ -1,6 +1,6 @@
 diff -ruN src_origin_with_susfs/fs/d_path.c src_modified_with_susfs/fs/d_path.c
---- src_origin_with_susfs/fs/d_path.c	2025-12-17 01:59:46.847673553 +0800
-+++ src_modified_with_susfs/fs/d_path.c	2025-12-17 01:59:46.843673172 +0800
+--- src_origin_with_susfs/fs/d_path.c	2025-12-18 08:46:12.585508731 +0800
++++ src_modified_with_susfs/fs/d_path.c	2025-12-18 08:46:12.582508731 +0800
 @@ -8,6 +8,9 @@
  #include <linux/prefetch.h>
  #include "mount.h"
@@ -40,7 +40,7 @@ diff -ruN src_origin_with_susfs/fs/d_path.c src_modified_with_susfs/fs/d_path.c
  
 diff -ruN src_origin_with_susfs/fs/hymofs.c src_modified_with_susfs/fs/hymofs.c
 --- src_origin_with_susfs/fs/hymofs.c	1970-01-01 08:00:00.000000000 +0800
-+++ src_modified_with_susfs/fs/hymofs.c	2025-12-17 16:43:56.380295622 +0800
++++ src_modified_with_susfs/fs/hymofs.c	2025-12-18 11:11:43.540383524 +0800
 @@ -0,0 +1,1265 @@
 +#include <linux/string.h>
 +#include <linux/mm.h>
@@ -303,7 +303,7 @@ diff -ruN src_origin_with_susfs/fs/hymofs.c src_modified_with_susfs/fs/hymofs.c
 +    }
 +    
 +    if (cmd == HYMO_IOC_GET_VERSION) {
-+        return atomic_read(&hymo_version);
++        return HYMO_PROTOCOL_VERSION;
 +    }
 +
 +    if (cmd == HYMO_IOC_SET_DEBUG) {
@@ -1467,8 +1467,8 @@ diff -ruN src_origin_with_susfs/fs/hymofs_ioctl.h src_modified_with_susfs/fs/hym
 +
 +#endif
 diff -ruN src_origin_with_susfs/fs/Kconfig src_modified_with_susfs/fs/Kconfig
---- src_origin_with_susfs/fs/Kconfig	2025-12-17 01:59:46.847673553 +0800
-+++ src_modified_with_susfs/fs/Kconfig	2025-12-17 01:59:46.843673172 +0800
+--- src_origin_with_susfs/fs/Kconfig	2025-12-18 08:46:12.585508731 +0800
++++ src_modified_with_susfs/fs/Kconfig	2025-12-18 08:46:12.582508731 +0800
 @@ -405,4 +405,10 @@
  config IO_WQ
  	bool
@@ -1481,8 +1481,8 @@ diff -ruN src_origin_with_susfs/fs/Kconfig src_modified_with_susfs/fs/Kconfig
 +
  endmenu
 diff -ruN src_origin_with_susfs/fs/Makefile src_modified_with_susfs/fs/Makefile
---- src_origin_with_susfs/fs/Makefile	2025-12-17 01:59:46.847673553 +0800
-+++ src_modified_with_susfs/fs/Makefile	2025-12-17 01:59:46.843673172 +0800
+--- src_origin_with_susfs/fs/Makefile	2025-12-18 08:46:12.585508731 +0800
++++ src_modified_with_susfs/fs/Makefile	2025-12-18 08:46:12.582508731 +0800
 @@ -23,6 +23,7 @@
  		kernel_read_file.o mnt_idmapping.o remap_range.o
  
@@ -1492,8 +1492,8 @@ diff -ruN src_origin_with_susfs/fs/Makefile src_modified_with_susfs/fs/Makefile
  obj-$(CONFIG_BUFFER_HEAD)	+= buffer.o mpage.o
  obj-$(CONFIG_PROC_FS)		+= proc_namespace.o
 diff -ruN src_origin_with_susfs/fs/namei.c src_modified_with_susfs/fs/namei.c
---- src_origin_with_susfs/fs/namei.c	2025-12-17 01:59:46.847673553 +0800
-+++ src_modified_with_susfs/fs/namei.c	2025-12-17 01:59:46.844673267 +0800
+--- src_origin_with_susfs/fs/namei.c	2025-12-18 08:46:12.585508731 +0800
++++ src_modified_with_susfs/fs/namei.c	2025-12-18 08:46:12.583508731 +0800
 @@ -57,6 +57,10 @@
  extern const struct qstr susfs_fake_qstr_name;
  #endif
@@ -1529,8 +1529,8 @@ diff -ruN src_origin_with_susfs/fs/namei.c src_modified_with_susfs/fs/namei.c
  	struct filename *result;
  	char *kname;
 diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.c
---- src_origin_with_susfs/fs/readdir.c	2025-12-17 01:59:46.847673553 +0800
-+++ src_modified_with_susfs/fs/readdir.c	2025-12-17 01:59:46.845673362 +0800
+--- src_origin_with_susfs/fs/readdir.c	2025-12-18 08:46:12.586508731 +0800
++++ src_modified_with_susfs/fs/readdir.c	2025-12-18 08:46:12.583508731 +0800
 @@ -32,6 +32,11 @@
  extern bool susfs_is_base_dentry_android_data_dir(struct dentry* base);
  extern bool susfs_is_base_dentry_sdcard_dir(struct dentry* base);
@@ -1835,8 +1835,8 @@ diff -ruN src_origin_with_susfs/fs/readdir.c src_modified_with_susfs/fs/readdir.
  	return error;
  }
 diff -ruN src_origin_with_susfs/fs/stat.c src_modified_with_susfs/fs/stat.c
---- src_origin_with_susfs/fs/stat.c	2025-12-17 01:59:46.848673648 +0800
-+++ src_modified_with_susfs/fs/stat.c	2025-12-17 01:59:46.845673362 +0800
+--- src_origin_with_susfs/fs/stat.c	2025-12-18 08:46:12.586508731 +0800
++++ src_modified_with_susfs/fs/stat.c	2025-12-18 08:46:12.583508731 +0800
 @@ -34,6 +34,10 @@
  extern void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
  #endif
@@ -1876,8 +1876,8 @@ diff -ruN src_origin_with_susfs/fs/stat.c src_modified_with_susfs/fs/stat.c
  }
  EXPORT_SYMBOL(vfs_getattr_nosec);
 diff -ruN src_origin_with_susfs/fs/xattr.c src_modified_with_susfs/fs/xattr.c
---- src_origin_with_susfs/fs/xattr.c	2025-12-17 01:59:46.848673648 +0800
-+++ src_modified_with_susfs/fs/xattr.c	2025-12-17 01:59:46.845673362 +0800
+--- src_origin_with_susfs/fs/xattr.c	2025-12-18 08:46:12.586508731 +0800
++++ src_modified_with_susfs/fs/xattr.c	2025-12-18 08:46:12.583508731 +0800
 @@ -25,6 +25,9 @@
  #include <linux/posix_acl_xattr.h>
  

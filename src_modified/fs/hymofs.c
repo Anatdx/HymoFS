@@ -253,7 +253,7 @@ static long hymo_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
     }
     
     if (cmd == HYMO_IOC_GET_VERSION) {
-        return atomic_read(&hymo_version);
+        return HYMO_PROTOCOL_VERSION;
     }
 
     if (cmd == HYMO_IOC_SET_DEBUG) {
