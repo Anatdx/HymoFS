@@ -4,13 +4,16 @@
 #include <linux/ioctl.h>
 
 #define HYMO_IOC_MAGIC 0xE0
-#define HYMO_PROTOCOL_VERSION 5
+#define HYMO_PROTOCOL_VERSION 6
 
 struct hymo_ioctl_arg {
     char *src;
     char *target;
     int type;
 };
+
+#define HYMO_TYPE_REDIRECT 0
+#define HYMO_TYPE_MERGE 1
 
 #define HYMO_IOC_ADD_RULE    _IOW(HYMO_IOC_MAGIC, 1, struct hymo_ioctl_arg)
 #define HYMO_IOC_DEL_RULE    _IOW(HYMO_IOC_MAGIC, 2, struct hymo_ioctl_arg)
@@ -32,5 +35,6 @@ struct hymo_ioctl_list_arg {
 #define HYMO_IOC_REORDER_MNT_ID _IO(HYMO_IOC_MAGIC, 9)
 #define HYMO_IOC_SET_STEALTH _IOW(HYMO_IOC_MAGIC, 10, int)
 #define HYMO_IOC_HIDE_OVERLAY_XATTRS _IOW(HYMO_IOC_MAGIC, 11, struct hymo_ioctl_arg)
+#define HYMO_IOC_ADD_MERGE_RULE _IOW(HYMO_IOC_MAGIC, 12, struct hymo_ioctl_arg)
 
 #endif

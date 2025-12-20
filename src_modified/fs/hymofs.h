@@ -14,15 +14,22 @@
 #define HYMO_MIRROR_NAME "hymo_mirror"
 #define HYMO_MIRROR_PATH "/dev/" HYMO_MIRROR_NAME
 
+struct hymo_merge_target_node {
+    struct list_head list;
+    char *target;
+};
+
 struct hymo_readdir_context {
     struct file *file;
     char *path_buf;
     char *dir_path;
     int dir_path_len;
     bool entry_written;
+    struct list_head merge_targets;
+    bool is_replace_mode;
 };
 
-extern atomic_t hymo_version;
+extern atomic_t hymo_atomiconfig;
 
 void __hymofs_prepare_readdir(struct hymo_readdir_context *ctx, struct file *file);
 void __hymofs_cleanup_readdir(struct hymo_readdir_context *ctx);
@@ -52,7 +59,7 @@ static inline void hymofs_prepare_readdir(struct hymo_readdir_context *ctx, stru
 {
     ctx->path_buf = NULL;
     ctx->file = file;
-    if (atomic_read(&hymo_version) == 0) return;
+    if (atomic_read(&hymo_atomiconfig) == 0) return;
     __hymofs_prepare_readdir(ctx, file);
 }
 
@@ -69,25 +76,25 @@ static inline bool hymofs_check_filldir(struct hymo_readdir_context *ctx, const 
 
 static inline char *hymofs_resolve_target(const char *pathname)
 {
-    if (atomic_read(&hymo_version) == 0) return NULL;
+    if (atomic_read(&hymo_atomiconfig) == 0) return NULL;
     return __hymofs_resolve_target(pathname);
 }
 
 static inline char *hymofs_reverse_lookup(const char *pathname)
 {
-    if (atomic_read(&hymo_version) == 0) return NULL;
+    if (atomic_read(&hymo_atomiconfig) == 0) return NULL;
     return __hymofs_reverse_lookup(pathname);
 }
 
 static inline bool hymofs_should_hide(const char *pathname)
 {
-    if (atomic_read(&hymo_version) == 0) return false;
+    if (atomic_read(&hymo_atomiconfig) == 0) return false;
     return __hymofs_should_hide(pathname);
 }
 
 static inline bool hymofs_should_spoof_mtime(const char *pathname)
 {
-    if (atomic_read(&hymo_version) == 0) return false;
+    if (atomic_read(&hymo_atomiconfig) == 0) return false;
     return __hymofs_should_spoof_mtime(pathname);
 }
 

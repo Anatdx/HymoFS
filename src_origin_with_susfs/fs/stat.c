@@ -34,6 +34,10 @@
 extern void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
 #endif
 
+#ifdef CONFIG_HYMOFS
+#include "hymofs.h"
+#endif
+
 /**
  * generic_fillattr - Fill in the basic attributes from the inode struct
  * @idmap:		idmap of the mount the inode was found from
@@ -152,12 +156,26 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 				  STATX_ATTR_DAX);
 
 	idmap = mnt_idmap(path->mnt);
+#ifdef CONFIG_HYMOFS
+	if (inode->i_op->getattr) {
+		int ret = inode->i_op->getattr(idmap, path, stat,
+					    request_mask,
+					    query_flags | AT_GETATTR_NOSEC);
+        if (ret == 0) hymofs_spoof_stat(path, stat);
+        return ret;
+    }
+#else
 	if (inode->i_op->getattr)
 		return inode->i_op->getattr(idmap, path, stat,
 					    request_mask,
 					    query_flags | AT_GETATTR_NOSEC);
+#endif
 
 	generic_fillattr(idmap, request_mask, inode, stat);
+#ifdef CONFIG_HYMOFS
+	/* HymoFS: Spoof timestamps if needed */
+	hymofs_spoof_stat(path, stat);
+#endif
 	return 0;
 }
 EXPORT_SYMBOL(vfs_getattr_nosec);
@@ -236,6 +254,7 @@ int getname_statx_lookup_flags(int flags)
 }
 
 #ifdef CONFIG_KSU_SUSFS
+extern bool ksu_su_compat_enabled __read_mostly;
 extern bool __ksu_is_allow_uid_for_current(uid_t uid);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 extern int ksu_handle_stat(int *dfd, struct filename **filename, int *flags);
@@ -267,7 +286,7 @@ static int vfs_statx(int dfd, struct filename *filename, int flags,
 	int error;
 
 #ifdef CONFIG_KSU_SUSFS
-	if (likely(susfs_is_current_proc_umounted())) {
+	if (likely(susfs_is_current_proc_umounted()) || !ksu_su_compat_enabled) {
 		goto orig_flow;
 	}
 

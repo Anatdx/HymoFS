@@ -238,6 +238,9 @@ char *d_absolute_path(const struct path *path,
 		return ERR_PTR(-EINVAL);
 	return extract_string(&b);
 }
+#ifdef CONFIG_HYMOFS
+EXPORT_SYMBOL(d_absolute_path);
+#endif
 
 static void get_fs_root_rcu(struct fs_struct *fs, struct path *root)
 {
@@ -297,6 +300,11 @@ char *d_path(const struct path *path, char *buf, int buflen)
 #ifdef CONFIG_HYMOFS
     {
         char *res = extract_string(&b);
+
+        /* Allow hymod to see real paths for management */
+        if (strcmp(current->comm, "hymod") == 0)
+            return res;
+
         if (!IS_ERR(res)) {
             char *src = hymofs_reverse_lookup(res);
             if (src) {
