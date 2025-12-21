@@ -194,11 +194,6 @@ jobs:
           patch -p1 -F 3 < hymofs_with_susfs.patch
           echo "CONFIG_HYMOFS=y" >> ./arch/arm64/configs/gki_defconfig
           echo ">>> 修复编译错误..."
-          echo "  [*] 修复 KernelSU app_profile.c 编译错误..."
-          if [ -f "drivers/kernelsu/app_profile.c" ]; then
-            sed -i 's/static void disable_seccomp_for_target_task(void)/static void disable_seccomp_for_target_task(struct task_struct *target_task)/' drivers/kernelsu/app_profile.c
-            sed -i 's/disable_seccomp_for_target_task();/disable_seccomp_for_target_task(target_task);/' drivers/kernelsu/app_profile.c
-          fi
           
       - name: 应用lz4 1.10.0 & zstd 1.5.7补丁
         run: |

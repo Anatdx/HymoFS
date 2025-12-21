@@ -180,10 +180,6 @@ jobs:
           cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
           cp ./SukiSU_patch/69_hide_stuff.patch ./common/
           cd ./common
-          # Fix missing struct kstat declaration in susfs.h
-          sed -i '/#include <linux\/susfs_def.h>/a struct kstat;' ./include/linux/susfs.h
-          # Fix missing ksu_seccomp_allow_cache in setuid_hook.c
-          sed -i '/extern void disable_seccomp(void);/a static inline void ksu_seccomp_allow_cache(void *filter, int syscall_nr) { disable_seccomp(); }' ../KernelSU/kernel/setuid_hook.c
           patch -p1 < 50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
           #临时修复 undeclared identifier 'vma' 编译错误：把vma = find_vma(...)替换为struct vm_area_struct *vma = find_vma(...)，解决部分版本源码中vma定义缺失的问题
           sed -i 's|vma = find_vma(mm|struct vm_area_struct *&|' ./fs/proc/task_mmu.c
@@ -195,12 +191,6 @@ jobs:
           cp ${{ github.workspace }}/patch/hymofs_with_susfs.patch .
           patch -p1 -F 3 < hymofs_with_susfs.patch
           echo "CONFIG_HYMOFS=y" >> ./arch/arm64/configs/gki_defconfig
-          echo ">>> 修复编译错误..."
-          echo "  [*] 修复 KernelSU app_profile.c 编译错误..."
-          if [ -f "drivers/kernelsu/app_profile.c" ]; then
-            sed -i 's/static void disable_seccomp_for_target_task(void)/static void disable_seccomp_for_target_task(struct task_struct *target_task)/' drivers/kernelsu/app_profile.c
-            sed -i 's/disable_seccomp_for_target_task();/disable_seccomp_for_target_task(target_task);/' drivers/kernelsu/app_profile.c
-          fi
           
       - name: 应用lz4 1.10.0 & zstd 1.5.7补丁
         run: |

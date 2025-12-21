@@ -63,12 +63,30 @@ Retrieves a list of all currently active rules.
 *   **Mechanism**: Directly reads from the `/dev/hymo_ctl` device file. The kernel generates text-formatted data containing all rules.
 *   **Format**:
     ```text
-    HymoFS Protocol: 4
+    HymoFS Protocol: 6
     HymoFS Config Version: 123
     add /source /target 8
     hide /path/to/hide
     inject /path/to/inject
+    merge /source /target
     ```
+
+#### 7. Merge (Merge Mode)
+Merges the contents of a target directory into a source directory, allowing the source directory to show both its original files and files from the target directory.
+*   **IOCTL**: `HYMO_IOC_ADD_MERGE_RULE`
+*   **Argument**: `struct hymo_ioctl_arg`
+    *   `src`: Source directory path
+    *   `target`: Target directory path
+*   **Mechanism**:
+    *   **Injection**: Automatically adds the source directory to the injection list. During `readdir`, it reads entries from the target directory and injects them into the listing alongside original entries.
+    *   **Redirection**: Access to merged files is automatically redirected to the target path.
+    *   **Attribute Preservation**: Access to the source directory itself (e.g., `ls -ld /source`) is not redirected, preserving original attributes.
+
+#### 8. Stealth & Debug
+*   **Set Debug**: `HYMO_IOC_SET_DEBUG` (8) - Enable/Disable kernel debug logging.
+*   **Set Stealth**: `HYMO_IOC_SET_STEALTH` (10) - Enable stealth mode, spoofing mount point device names.
+*   **Reorder Mount ID**: `HYMO_IOC_REORDER_MNT_ID` (9) - Reorder mount IDs to prevent detection via ID sequence.
+*   **Hide Overlay Xattrs**: `HYMO_IOC_HIDE_OVERLAY_XATTRS` (11) - Hide specific extended attributes (like `trusted.overlay.*`) to prevent OverlayFS detection.
 
 ## Implementation Details
 
@@ -76,12 +94,19 @@ Retrieves a list of all currently active rules.
 *   **hymofs_ioctl.h**: Defines the User API (UAPI), including `ioctl` command codes and data structures. Userspace tools only need to include this header.
 *   **hymofs.h**: Kernel module internal implementation header, containing kernel data structures and function declarations.
 *   **hymofs.c**: Core logic implementation, including character device registration, ioctl handling, hash table management, etc.
+*   **Atomic Config**: Uses `atomic_t hymo_atomiconfig` as a global configuration version counter.
+    *   **Performance Optimization**: Checked at the beginning of all hooks. If 0 (no rules), hooks return immediately, ensuring zero overhead.
+    *   **Atomic Updates**: Any rule change (add, delete, clear) atomically increments this counter, ensuring configuration consistency across multi-core environments.
 
 ### 2. Path Resolution Hook (`fs/namei.c`)
 *   **Function**: `getname_flags`
 *   **Logic**:
-    1.  **Hide Check**: Checks if the resolved filename is in the `hymo_hide_paths` hash table. If found, it immediately returns `ERR_PTR(-ENOENT)`.
-    2.  **Redirect Check**: Checks if the filename is in the `hymo_paths` hash table. If found, it resolves the target path and restarts the lookup with the new path (`getname_kernel`).
+    1.  **Relative Path Handling**: If the path is relative (does not start with `/`), it automatically retrieves the current working directory (CWD) of the process and prepends it to form an absolute path, ensuring accurate rule matching.
+    2.  **Hide Check**: Checks if the resolved filename is in the `hymo_hide_paths` hash table. If found, it immediately returns `ERR_PTR(-ENOENT)`.
+    3.  **Redirect Check**: Checks if the filename is in the `hymo_paths` hash table.
+        *   **Merge Mode Support**: If the path ends with `/.` or `/..`, redirection is skipped. This allows tools like `ls` to read the attributes of the original directory, enabling the "merging" of original and injected files and preventing original files from disappearing.
+        *   **Redirect Execution**: If matched and not one of the special cases above, it resolves the target path and restarts the lookup with the new path (`getname_kernel`).
+    4.  **Recursion Prevention**: Uses the `current->hymofs_recursion` flag to prevent infinite loops when resolving target paths.
 
 ### 3. Directory Listing Hook (`fs/readdir.c`)
 *   **Functions**: `filldir`, `filldir64`, `getdents`, `getdents64`
