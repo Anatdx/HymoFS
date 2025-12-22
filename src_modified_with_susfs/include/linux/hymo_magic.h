@@ -1,11 +1,10 @@
 #ifndef _LINUX_HYMO_MAGIC_H
 #define _LINUX_HYMO_MAGIC_H
 
-#define HYMO_MAGIC1 0x48594D4F // "HYMO"
-#define HYMO_MAGIC2 0x524F4F54 // "ROOT"
+#define HYMO_MAGIC1 0x48594D4F
+#define HYMO_MAGIC2 0x524F4F54
 #define HYMO_PROTOCOL_VERSION 7
 
-// Command definitions
 #define HYMO_CMD_ADD_RULE    0x48001
 #define HYMO_CMD_DEL_RULE    0x48002
 #define HYMO_CMD_HIDE_RULE   0x48003
@@ -19,6 +18,7 @@
 #define HYMO_CMD_HIDE_OVERLAY_XATTRS 0x48011
 #define HYMO_CMD_ADD_MERGE_RULE 0x48012
 #define HYMO_CMD_SET_AVC_LOG_SPOOFING 0x48013
+#define HYMO_CMD_SET_MIRROR_PATH 0x48014
 
 struct hymo_syscall_arg {
     char *src;
