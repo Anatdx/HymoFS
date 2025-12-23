@@ -1,6 +1,6 @@
 diff -ruN src_origin/fs/d_path.c src_modified/fs/d_path.c
---- src_origin/fs/d_path.c	2025-12-22 22:48:06.016461042 +0800
-+++ src_modified/fs/d_path.c	2025-12-22 22:48:06.012667957 +0800
+--- src_origin/fs/d_path.c	2025-12-23 00:44:49.330465216 +0800
++++ src_modified/fs/d_path.c	2025-12-23 00:44:49.324465361 +0800
 @@ -8,6 +8,9 @@
  #include <linux/prefetch.h>
  #include "mount.h"
@@ -76,8 +76,8 @@ diff -ruN src_origin/fs/d_path.c src_modified/fs/d_path.c
  
 diff -ruN src_origin/fs/hymofs.c src_modified/fs/hymofs.c
 --- src_origin/fs/hymofs.c	1970-01-01 08:00:00.000000000 +0800
-+++ src_modified/fs/hymofs.c	2025-12-22 23:02:29.388444631 +0800
-@@ -0,0 +1,1711 @@
++++ src_modified/fs/hymofs.c	2025-12-23 01:40:35.532607002 +0800
+@@ -0,0 +1,1772 @@
 +#include <linux/string.h>
 +#include <linux/mm.h>
 +#include <linux/file.h>
@@ -175,7 +175,12 @@ diff -ruN src_origin/fs/hymofs.c src_modified/fs/hymofs.c
 +static bool hymo_debug_enabled = false;
 +module_param(hymo_debug_enabled, bool, 0644);
 +MODULE_PARM_DESC(hymo_debug_enabled, "Enable debug logging");
-+static bool hymo_stealth_enabled = true; // Default to true for security
++static bool hymo_stealth_enabled = true;
++
++static char hymo_mirror_path_buf[PATH_MAX] = HYMO_DEFAULT_MIRROR_PATH;
++static char hymo_mirror_name_buf[NAME_MAX] = HYMO_DEFAULT_MIRROR_NAME;
++static char *hymo_current_mirror_path = hymo_mirror_path_buf;
++static char *hymo_current_mirror_name = hymo_mirror_name_buf;
 +
 +#define hymo_log(fmt, ...) do { \
 +    if (hymo_debug_enabled) \
@@ -267,8 +272,8 @@ diff -ruN src_origin/fs/hymofs.c src_modified/fs/hymofs.c
 +        is_hymo_mount = false;
 +        
 +        if (m->mnt_devname && (
-+            strcmp(m->mnt_devname, HYMO_MIRROR_PATH) == 0 || 
-+            strcmp(m->mnt_devname, HYMO_MIRROR_NAME) == 0
++            strcmp(m->mnt_devname, hymo_current_mirror_path) == 0 || 
++            strcmp(m->mnt_devname, hymo_current_mirror_name) == 0
 +        )) {
 +            is_hymo_mount = true;
 +        }
@@ -322,8 +327,8 @@ diff -ruN src_origin/fs/hymofs.c src_modified/fs/hymofs.c
 +
 +    list_for_each_entry(m, &ns->list, mnt_list) {
 +        if (m->mnt_devname && (
-+            strcmp(m->mnt_devname, HYMO_MIRROR_PATH) == 0 || 
-+            strcmp(m->mnt_devname, HYMO_MIRROR_NAME) == 0
++            strcmp(m->mnt_devname, hymo_current_mirror_path) == 0 || 
++            strcmp(m->mnt_devname, hymo_current_mirror_name) == 0
 +        )) {
 +            // Spoof devname
 +            const char *old_name = m->mnt_devname;
@@ -352,6 +357,10 @@ diff -ruN src_origin/fs/hymofs.c src_modified/fs/hymofs.c
 +    if (cmd == HYMO_CMD_CLEAR_ALL) {
 +        spin_lock_irqsave(&hymo_lock, flags);
 +        hymo_cleanup();
++        strscpy(hymo_mirror_path_buf, HYMO_DEFAULT_MIRROR_PATH, PATH_MAX);
++        strscpy(hymo_mirror_name_buf, HYMO_DEFAULT_MIRROR_NAME, NAME_MAX);
++        hymo_current_mirror_path = hymo_mirror_path_buf;
++        hymo_current_mirror_name = hymo_mirror_name_buf;
 +        atomic_inc(&hymo_atomiconfig);
 +        spin_unlock_irqrestore(&hymo_lock, flags);
 +        return 0;
@@ -388,6 +397,49 @@ diff -ruN src_origin/fs/hymofs.c src_modified/fs/hymofs.c
 +    }
 +
 +    if (copy_from_user(&req, arg, sizeof(req))) return -EFAULT;
++
++    if (cmd == HYMO_CMD_SET_MIRROR_PATH) {
++        char *new_path = NULL;
++        char *new_name = NULL;
++        
++        if (req.src) {
++            new_path = strndup_user(req.src, PATH_MAX);
++            if (IS_ERR(new_path)) return PTR_ERR(new_path);
++        } else {
++            return -EINVAL;
++        }
++
++        hymo_log("setting mirror path to: %s\n", new_path);
++
++        /* Strip trailing slash if present */
++        size_t len = strlen(new_path);
++        if (len > 1 && new_path[len - 1] == '/') {
++            new_path[len - 1] = '\0';
++        }
++
++        char *slash = strrchr(new_path, '/');
++        if (slash) {
++            new_name = kstrdup(slash + 1, GFP_KERNEL);
++        } else {
++            new_name = kstrdup(new_path, GFP_KERNEL);
++        }
++
++        if (!new_name) {
++            kfree(new_path);
++            return -ENOMEM;
++        }
++
++        spin_lock_irqsave(&hymo_lock, flags);
++        strscpy(hymo_mirror_path_buf, new_path, PATH_MAX);
++        strscpy(hymo_mirror_name_buf, new_name, NAME_MAX);
++        hymo_current_mirror_path = hymo_mirror_path_buf;
++        hymo_current_mirror_name = hymo_mirror_name_buf;
++        spin_unlock_irqrestore(&hymo_lock, flags);
++
++        kfree(new_path);
++        kfree(new_name);
++        return 0;
++    }
 +
 +    if (req.src) {
 +        src = strndup_user(req.src, PAGE_SIZE);
@@ -992,18 +1044,27 @@ diff -ruN src_origin/fs/hymofs.c src_modified/fs/hymofs.c
 +    /* Root sees everything */
 +    if (uid_eq(current_uid(), GLOBAL_ROOT_UID)) return false;
 +
++    hash = full_name_hash(NULL, pathname, len);
++    spin_lock_irqsave(&hymo_lock, flags);
++
 +    /* Hide control interface from non-root if stealth is enabled */
 +    if (hymo_stealth_enabled) {
 +#ifdef CONFIG_HYMOFS_USE_KSU
-+        if (susfs_is_current_ksu_domain()) return false;
++        if (susfs_is_current_ksu_domain()) {
++            spin_unlock_irqrestore(&hymo_lock, flags);
++            return false;
++        }
 +#endif
-+        /* Fast check using length first */
-+        if (len == sizeof(HYMO_MIRROR_NAME)-1 && strcmp(pathname, HYMO_MIRROR_NAME) == 0) return true;
-+        if (len == sizeof(HYMO_MIRROR_PATH)-1 && strcmp(pathname, HYMO_MIRROR_PATH) == 0) return true;
++        size_t name_len = strlen(hymo_current_mirror_name);
++        size_t path_len = strlen(hymo_current_mirror_path);
++
++        if ((len == name_len && strcmp(pathname, hymo_current_mirror_name) == 0) ||
++            (len == path_len && strcmp(pathname, hymo_current_mirror_path) == 0)) {
++            spin_unlock_irqrestore(&hymo_lock, flags);
++            return true;
++        }
 +    }
 +
-+    hash = full_name_hash(NULL, pathname, len);
-+    spin_lock_irqsave(&hymo_lock, flags);
 +    hash_for_each_possible(hymo_hide_paths, entry, node, hash) {
 +        if (strcmp(entry->path, pathname) == 0) {
 +#ifdef CONFIG_HYMOFS_USE_KSU
@@ -1791,7 +1852,7 @@ diff -ruN src_origin/fs/hymofs.c src_modified/fs/hymofs.c
 +#endif /* CONFIG_HYMOFS */
 diff -ruN src_origin/fs/hymofs.h src_modified/fs/hymofs.h
 --- src_origin/fs/hymofs.h	1970-01-01 08:00:00.000000000 +0800
-+++ src_modified/fs/hymofs.h	2025-12-22 22:48:06.012667957 +0800
++++ src_modified/fs/hymofs.h	2025-12-23 01:41:01.209986530 +0800
 @@ -0,0 +1,122 @@
 +#ifndef _LINUX_HYMOFS_H
 +#define _LINUX_HYMOFS_H
@@ -1804,8 +1865,8 @@ diff -ruN src_origin/fs/hymofs.h src_modified/fs/hymofs.h
 +
 +#define HYMO_MAGIC_POS 0x7000000000000000ULL
 +
-+#define HYMO_MIRROR_NAME "hymo_mirror"
-+#define HYMO_MIRROR_PATH "/dev/" HYMO_MIRROR_NAME
++#define HYMO_DEFAULT_MIRROR_NAME "hymo_mirror"
++#define HYMO_DEFAULT_MIRROR_PATH "/dev/" HYMO_DEFAULT_MIRROR_NAME
 +
 +struct hymo_merge_target_node {
 +    struct list_head list;
@@ -1916,8 +1977,8 @@ diff -ruN src_origin/fs/hymofs.h src_modified/fs/hymofs.h
 +
 +#endif /* _LINUX_HYMOFS_H */
 diff -ruN src_origin/fs/Kconfig src_modified/fs/Kconfig
---- src_origin/fs/Kconfig	2025-12-22 22:48:06.016380944 +0800
-+++ src_modified/fs/Kconfig	2025-12-22 22:48:06.012586692 +0800
+--- src_origin/fs/Kconfig	2025-12-23 00:44:49.330465216 +0800
++++ src_modified/fs/Kconfig	2025-12-23 00:44:49.324465361 +0800
 @@ -405,4 +405,17 @@
  config IO_WQ
  	bool
@@ -1937,8 +1998,8 @@ diff -ruN src_origin/fs/Kconfig src_modified/fs/Kconfig
 +
  endmenu
 diff -ruN src_origin/fs/Makefile src_modified/fs/Makefile
---- src_origin/fs/Makefile	2025-12-22 22:48:06.016461042 +0800
-+++ src_modified/fs/Makefile	2025-12-22 22:48:06.012667957 +0800
+--- src_origin/fs/Makefile	2025-12-23 00:44:49.330465216 +0800
++++ src_modified/fs/Makefile	2025-12-23 00:44:49.324465361 +0800
 @@ -22,6 +22,8 @@
  		fs_types.o fs_context.o fs_parser.o fsopen.o init.o \
  		kernel_read_file.o mnt_idmapping.o remap_range.o
@@ -1949,8 +2010,8 @@ diff -ruN src_origin/fs/Makefile src_modified/fs/Makefile
  obj-$(CONFIG_PROC_FS)		+= proc_namespace.o
  obj-$(CONFIG_LEGACY_DIRECT_IO)	+= direct-io.o
 diff -ruN src_origin/fs/namei.c src_modified/fs/namei.c
---- src_origin/fs/namei.c	2025-12-22 22:48:06.016461042 +0800
-+++ src_modified/fs/namei.c	2025-12-22 22:48:06.013008781 +0800
+--- src_origin/fs/namei.c	2025-12-23 00:44:49.331465192 +0800
++++ src_modified/fs/namei.c	2025-12-23 00:44:49.326465313 +0800
 @@ -45,6 +45,11 @@
  #include "internal.h"
  #include "mount.h"
@@ -1995,8 +2056,8 @@ diff -ruN src_origin/fs/namei.c src_modified/fs/namei.c
  		const struct open_flags *op)
  {
 diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
---- src_origin/fs/readdir.c	2025-12-22 22:48:06.016461042 +0800
-+++ src_modified/fs/readdir.c	2025-12-22 22:48:06.013008781 +0800
+--- src_origin/fs/readdir.c	2025-12-23 00:44:49.331465192 +0800
++++ src_modified/fs/readdir.c	2025-12-23 00:44:49.327465288 +0800
 @@ -24,6 +24,11 @@
  
  #include <asm/unaligned.h>
@@ -2293,8 +2354,8 @@ diff -ruN src_origin/fs/readdir.c src_modified/fs/readdir.c
  	return error;
  }
 diff -ruN src_origin/fs/stat.c src_modified/fs/stat.c
---- src_origin/fs/stat.c	2025-12-22 22:48:06.016461042 +0800
-+++ src_modified/fs/stat.c	2025-12-22 22:48:06.013008781 +0800
+--- src_origin/fs/stat.c	2025-12-23 00:44:49.332465167 +0800
++++ src_modified/fs/stat.c	2025-12-23 00:44:49.327465288 +0800
 @@ -25,6 +25,9 @@
  
  #include "internal.h"
@@ -2333,8 +2394,8 @@ diff -ruN src_origin/fs/stat.c src_modified/fs/stat.c
  }
  EXPORT_SYMBOL(vfs_getattr_nosec);
 diff -ruN src_origin/fs/xattr.c src_modified/fs/xattr.c
---- src_origin/fs/xattr.c	2025-12-22 22:48:06.017008659 +0800
-+++ src_modified/fs/xattr.c	2025-12-22 22:48:06.013008781 +0800
+--- src_origin/fs/xattr.c	2025-12-23 00:44:49.332465167 +0800
++++ src_modified/fs/xattr.c	2025-12-23 00:44:49.327465288 +0800
 @@ -25,6 +25,9 @@
  #include <linux/posix_acl_xattr.h>
  
@@ -2402,8 +2463,8 @@ diff -ruN src_origin/fs/xattr.c src_modified/fs/xattr.c
  
 diff -ruN src_origin/include/linux/hymo_magic.h src_modified/include/linux/hymo_magic.h
 --- src_origin/include/linux/hymo_magic.h	1970-01-01 08:00:00.000000000 +0800
-+++ src_modified/include/linux/hymo_magic.h	2025-12-22 22:48:06.014025288 +0800
-@@ -0,0 +1,34 @@
++++ src_modified/include/linux/hymo_magic.h	2025-12-23 01:39:39.270966518 +0800
+@@ -0,0 +1,35 @@
 +#ifndef _LINUX_HYMO_MAGIC_H
 +#define _LINUX_HYMO_MAGIC_H
 +
@@ -2425,6 +2486,7 @@ diff -ruN src_origin/include/linux/hymo_magic.h src_modified/include/linux/hymo_
 +#define HYMO_CMD_HIDE_OVERLAY_XATTRS 0x48011
 +#define HYMO_CMD_ADD_MERGE_RULE 0x48012
 +#define HYMO_CMD_SET_AVC_LOG_SPOOFING 0x48013
++#define HYMO_CMD_SET_MIRROR_PATH 0x48014
 +
 +struct hymo_syscall_arg {
 +    char *src;
@@ -2438,9 +2500,10 @@ diff -ruN src_origin/include/linux/hymo_magic.h src_modified/include/linux/hymo_
 +};
 +
 +#endif
+\ No newline at end of file
 diff -ruN src_origin/kernel/reboot.c src_modified/kernel/reboot.c
---- src_origin/kernel/reboot.c	2025-12-22 22:48:06.017593922 +0800
-+++ src_modified/kernel/reboot.c	2025-12-22 22:48:06.014224536 +0800
+--- src_origin/kernel/reboot.c	2025-12-23 00:27:58.596409599 +0800
++++ src_modified/kernel/reboot.c	2025-12-22 23:32:49.927015107 +0800
 @@ -18,6 +18,7 @@
  #include <linux/syscalls.h>
  #include <linux/syscore_ops.h>
@@ -2477,8 +2540,8 @@ diff -ruN src_origin/kernel/reboot.c src_modified/kernel/reboot.c
  	/* We only trust the superuser with rebooting the system. */
  	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
 diff -ruN src_origin/security/selinux/avc.c src_modified/security/selinux/avc.c
---- src_origin/security/selinux/avc.c	2025-12-22 22:48:06.017618600 +0800
-+++ src_modified/security/selinux/avc.c	2025-12-22 22:48:06.014257501 +0800
+--- src_origin/security/selinux/avc.c	2025-12-23 00:44:49.188844389 +0800
++++ src_modified/security/selinux/avc.c	2025-12-23 01:59:52.740959056 +0800
 @@ -47,6 +47,14 @@
  #undef CREATE_TRACE_POINTS
  #include <trace/hooks/avc.h>

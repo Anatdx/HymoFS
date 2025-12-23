@@ -9,8 +9,8 @@
 
 #define HYMO_MAGIC_POS 0x7000000000000000ULL
 
-#define HYMO_MIRROR_NAME "hymo_mirror"
-#define HYMO_MIRROR_PATH "/dev/" HYMO_MIRROR_NAME
+#define HYMO_DEFAULT_MIRROR_NAME "hymo_mirror"
+#define HYMO_DEFAULT_MIRROR_PATH "/dev/" HYMO_DEFAULT_MIRROR_NAME
 
 struct hymo_merge_target_node {
     struct list_head list;

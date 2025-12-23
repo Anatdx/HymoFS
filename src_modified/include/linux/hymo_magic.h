@@ -19,6 +19,7 @@
 #define HYMO_CMD_HIDE_OVERLAY_XATTRS 0x48011
 #define HYMO_CMD_ADD_MERGE_RULE 0x48012
 #define HYMO_CMD_SET_AVC_LOG_SPOOFING 0x48013
+#define HYMO_CMD_SET_MIRROR_PATH 0x48014
 
 struct hymo_syscall_arg {
     char *src;

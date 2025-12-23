@@ -87,6 +87,7 @@ static inline int hymofs_reverse_lookup(const char *pathname, char *buf, size_t 
 static inline bool hymofs_should_hide(const char *pathname)
 {
     if (atomic_read(&hymo_atomiconfig) == 0) return false;
+    /* Fast path: check for NULL or empty */
     if (!pathname || !*pathname) return false;
     return __hymofs_should_hide(pathname, strlen(pathname));
 }
@@ -116,6 +117,6 @@ static inline bool hymofs_should_hide(const char *pathname) { return false; }
 static inline bool hymofs_should_spoof_mtime(const char *pathname) { return false; }
 static inline int hymofs_populate_injected_list(const char *dir_path, struct dentry *parent, struct list_head *head) { return 0; }
 
-#endif
+#endif /* CONFIG_HYMOFS */
 
-#endif
+#endif /* _LINUX_HYMOFS_H */

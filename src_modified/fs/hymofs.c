@@ -95,7 +95,12 @@ EXPORT_SYMBOL(hymo_atomiconfig);
 static bool hymo_debug_enabled = false;
 module_param(hymo_debug_enabled, bool, 0644);
 MODULE_PARM_DESC(hymo_debug_enabled, "Enable debug logging");
-static bool hymo_stealth_enabled = true; // Default to true for security
+static bool hymo_stealth_enabled = true;
+
+static char hymo_mirror_path_buf[PATH_MAX] = HYMO_DEFAULT_MIRROR_PATH;
+static char hymo_mirror_name_buf[NAME_MAX] = HYMO_DEFAULT_MIRROR_NAME;
+static char *hymo_current_mirror_path = hymo_mirror_path_buf;
+static char *hymo_current_mirror_name = hymo_mirror_name_buf;
 
 #define hymo_log(fmt, ...) do { \
     if (hymo_debug_enabled) \
@@ -187,8 +192,8 @@ static void hymofs_reorder_mnt_id(void)
         is_hymo_mount = false;
         
         if (m->mnt_devname && (
-            strcmp(m->mnt_devname, HYMO_MIRROR_PATH) == 0 || 
-            strcmp(m->mnt_devname, HYMO_MIRROR_NAME) == 0
+            strcmp(m->mnt_devname, hymo_current_mirror_path) == 0 || 
+            strcmp(m->mnt_devname, hymo_current_mirror_name) == 0
         )) {
             is_hymo_mount = true;
         }
@@ -242,8 +247,8 @@ static void hymofs_spoof_mounts(void)
 
     list_for_each_entry(m, &ns->list, mnt_list) {
         if (m->mnt_devname && (
-            strcmp(m->mnt_devname, HYMO_MIRROR_PATH) == 0 || 
-            strcmp(m->mnt_devname, HYMO_MIRROR_NAME) == 0
+            strcmp(m->mnt_devname, hymo_current_mirror_path) == 0 || 
+            strcmp(m->mnt_devname, hymo_current_mirror_name) == 0
         )) {
             // Spoof devname
             const char *old_name = m->mnt_devname;
@@ -272,6 +277,10 @@ static int hymo_dispatch_cmd(unsigned int cmd, void __user *arg) {
     if (cmd == HYMO_CMD_CLEAR_ALL) {
         spin_lock_irqsave(&hymo_lock, flags);
         hymo_cleanup();
+        strscpy(hymo_mirror_path_buf, HYMO_DEFAULT_MIRROR_PATH, PATH_MAX);
+        strscpy(hymo_mirror_name_buf, HYMO_DEFAULT_MIRROR_NAME, NAME_MAX);
+        hymo_current_mirror_path = hymo_mirror_path_buf;
+        hymo_current_mirror_name = hymo_mirror_name_buf;
         atomic_inc(&hymo_atomiconfig);
         spin_unlock_irqrestore(&hymo_lock, flags);
         return 0;
@@ -308,6 +317,49 @@ static int hymo_dispatch_cmd(unsigned int cmd, void __user *arg) {
     }
 
     if (copy_from_user(&req, arg, sizeof(req))) return -EFAULT;
+
+    if (cmd == HYMO_CMD_SET_MIRROR_PATH) {
+        char *new_path = NULL;
+        char *new_name = NULL;
+        
+        if (req.src) {
+            new_path = strndup_user(req.src, PATH_MAX);
+            if (IS_ERR(new_path)) return PTR_ERR(new_path);
+        } else {
+            return -EINVAL;
+        }
+
+        hymo_log("setting mirror path to: %s\n", new_path);
+
+        /* Strip trailing slash if present */
+        size_t len = strlen(new_path);
+        if (len > 1 && new_path[len - 1] == '/') {
+            new_path[len - 1] = '\0';
+        }
+
+        char *slash = strrchr(new_path, '/');
+        if (slash) {
+            new_name = kstrdup(slash + 1, GFP_KERNEL);
+        } else {
+            new_name = kstrdup(new_path, GFP_KERNEL);
+        }
+
+        if (!new_name) {
+            kfree(new_path);
+            return -ENOMEM;
+        }
+
+        spin_lock_irqsave(&hymo_lock, flags);
+        strscpy(hymo_mirror_path_buf, new_path, PATH_MAX);
+        strscpy(hymo_mirror_name_buf, new_name, NAME_MAX);
+        hymo_current_mirror_path = hymo_mirror_path_buf;
+        hymo_current_mirror_name = hymo_mirror_name_buf;
+        spin_unlock_irqrestore(&hymo_lock, flags);
+
+        kfree(new_path);
+        kfree(new_name);
+        return 0;
+    }
 
     if (req.src) {
         src = strndup_user(req.src, PAGE_SIZE);
@@ -912,18 +964,27 @@ bool __hymofs_should_hide(const char *pathname, size_t len)
     /* Root sees everything */
     if (uid_eq(current_uid(), GLOBAL_ROOT_UID)) return false;
 
+    hash = full_name_hash(NULL, pathname, len);
+    spin_lock_irqsave(&hymo_lock, flags);
+
     /* Hide control interface from non-root if stealth is enabled */
     if (hymo_stealth_enabled) {
 #ifdef CONFIG_HYMOFS_USE_KSU
-        if (susfs_is_current_ksu_domain()) return false;
+        if (susfs_is_current_ksu_domain()) {
+            spin_unlock_irqrestore(&hymo_lock, flags);
+            return false;
+        }
 #endif
-        /* Fast check using length first */
-        if (len == sizeof(HYMO_MIRROR_NAME)-1 && strcmp(pathname, HYMO_MIRROR_NAME) == 0) return true;
-        if (len == sizeof(HYMO_MIRROR_PATH)-1 && strcmp(pathname, HYMO_MIRROR_PATH) == 0) return true;
+        size_t name_len = strlen(hymo_current_mirror_name);
+        size_t path_len = strlen(hymo_current_mirror_path);
+
+        if ((len == name_len && strcmp(pathname, hymo_current_mirror_name) == 0) ||
+            (len == path_len && strcmp(pathname, hymo_current_mirror_path) == 0)) {
+            spin_unlock_irqrestore(&hymo_lock, flags);
+            return true;
+        }
     }
 
-    hash = full_name_hash(NULL, pathname, len);
-    spin_lock_irqsave(&hymo_lock, flags);
     hash_for_each_possible(hymo_hide_paths, entry, node, hash) {
         if (strcmp(entry->path, pathname) == 0) {
 #ifdef CONFIG_HYMOFS_USE_KSU
