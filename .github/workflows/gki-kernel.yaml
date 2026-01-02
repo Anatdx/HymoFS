@@ -8,6 +8,7 @@ env:
   KPM: On
   proxy: On
   APPLY_HYMOFS: On
+  APPLY_ADIOS: On
   KERNEL_MANIFEST: common-android16-6.12-2025-09
 
 on:
@@ -130,6 +131,17 @@ jobs:
           patch -p1 --forward < ${{ github.workspace }}/patch/unicode_bypass_fix.patch || true
 
           echo "  [*] Fixed applied!"
+
+      - name: "⚙️ Apply ADIOS Patch | 应用 ADIOS 补丁"
+        if: ${{ env.APPLY_ADIOS == 'On' }}
+        run: |
+          cd kernel_workspace/kernel_platform/common
+          wget https://raw.githubusercontent.com/firelzrd/adios/refs/heads/main/patches/testing/0001-linux6.12.44-ADIOS-3.1.8.patch
+          
+          patch -p1 -F 3 < 0001-linux6.12.44-ADIOS-3.1.8.patch
+
+          echo "  [*] ADIOS 代码注入完成！"
+      
       - name: "⚙️ Apply HymoFS Patch | 应用 HymoFS 补丁"
         if: ${{ env.APPLY_HYMOFS == 'On' }}
         run: |
@@ -202,7 +214,12 @@ jobs:
             echo "CONFIG_IP6_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
           fi
-
+          if [ "${{ env.APPLY_ADIOS }}" == "On" ]; then
+            # Add proxy config
+            echo "📦 ADIOS..."
+            echo "MQ_IOSCHED_ADIOS=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "MQ_IOSCHED_DEFAULT_ADIOS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          fi
           # Remove check_defconfig
           sed -i 's/check_defconfig//' ./common/build.config.gki
           # Replace error echo with a return in kleaf_internal_check_defconfig_minimized
