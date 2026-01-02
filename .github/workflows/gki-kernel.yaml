@@ -66,6 +66,8 @@ jobs:
 
       - name: "⬇️ Clone Kernel Source | 克隆内核源码"
         run: |
+          git clone https://github.com/WildKernels/AnyKernel3 --depth=1
+          rm -rf ./AnyKernel3/.git
           mkdir kernel_workspace && cd kernel_workspace
           mkdir kernel_platform
           cd kernel_platform
@@ -240,8 +242,6 @@ jobs:
       - name: "📦 Package Kernel | 打包内核"
         run: |
           echo "📦 准备AnyKernel3打包环境..."
-          git clone https://github.com/WildKernels/AnyKernel3 --depth=1
-          rm -rf ./AnyKernel3/.git
           mkdir -p kernel_workspace/kernel_platform/out/Final-Image-Find/
           dir1=""
           dir2=""
