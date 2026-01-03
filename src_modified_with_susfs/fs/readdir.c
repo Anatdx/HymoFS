@@ -22,8 +22,6 @@
 #include <linux/compat.h>
 #include <linux/uaccess.h>
 
-#include <asm/unaligned.h>
-
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 #include <linux/susfs_def.h>
 extern bool susfs_is_inode_sus_path(struct mnt_idmap *idmap, struct inode *inode);
@@ -85,7 +83,7 @@ int wrap_directory_iterator(struct file *file,
 EXPORT_SYMBOL(wrap_directory_iterator);
 
 /*
- * Note the "unsafe_put_user() semantics: we goto a
+ * Note the "unsafe_put_user()" semantics: we goto a
  * label for errors.
  */
 #define unsafe_copy_dirent_name(_dst, _src, _len, label) do {	\
@@ -106,6 +104,10 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 		goto out;
 
 	res = security_file_permission(file, MAY_READ);
+	if (res)
+		goto out;
+
+	res = fsnotify_file_perm(file, MAY_READ);
 	if (res)
 		goto out;
 
@@ -273,23 +275,23 @@ SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	struct inode *inode;
 #endif
 
-	if (!f.file)
+	if (!fd_file(f))
 		return -EBADF;
 #ifdef CONFIG_HYMOFS
-	hymofs_prepare_readdir(&buf.hymo, f.file);
+	hymofs_prepare_readdir(&buf.hymo, fd_file(f));
 #endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	buf.sb = f.file->f_inode->i_sb;
-	inode = f.file->f_path.dentry->d_inode;
-	if (f.file->f_path.dentry && inode) {
-		if (susfs_is_base_dentry_android_data_dir(f.file->f_path.dentry))
+	buf.sb = fd_file(f)->f_inode->i_sb;
+	inode = fd_file(f)->f_path.dentry->d_inode;
+	if (fd_file(f)->f_path.dentry && inode) {
+		if (susfs_is_base_dentry_android_data_dir(fd_file(f)->f_path.dentry))
 		{
 			buf.is_base_dentry_android_data_root_dir = true;
 			buf.is_base_dentry_sdcard_root_dir = false;
 			goto orig_flow;
 		}
-		if (susfs_is_base_dentry_sdcard_dir(f.file->f_path.dentry))
+		if (susfs_is_base_dentry_sdcard_dir(fd_file(f)->f_path.dentry))
 		{
 			buf.is_base_dentry_sdcard_root_dir = true;
 			buf.is_base_dentry_android_data_root_dir = false;
@@ -299,9 +301,10 @@ SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	buf.is_base_dentry_android_data_root_dir = false;
 	buf.is_base_dentry_sdcard_root_dir = false;
 orig_flow:
-	buf.idmap = mnt_idmap(f.file->f_path.mnt);
+	buf.idmap = mnt_idmap(fd_file(f)->f_path.mnt);
 #endif
-	error = iterate_dir(f.file, &buf.ctx);
+
+	error = iterate_dir(fd_file(f), &buf.ctx);
 	if (buf.result)
 		error = buf.result;
 
@@ -340,6 +343,9 @@ struct getdents_callback {
 	int prev_reclen;
 	int count;
 	int error;
+#ifdef CONFIG_HYMOFS
+	bool buffer_full;
+#endif
 };
 
 static bool filldir(struct dir_context *ctx, const char *name, int namlen,
@@ -366,8 +372,12 @@ static bool filldir(struct dir_context *ctx, const char *name, int namlen,
 	if (unlikely(buf->error))
 		return false;
 	buf->error = -EINVAL;	/* only used if we fail.. */
-	if (reclen > buf->count)
+	if (reclen > buf->count) {
+#ifdef CONFIG_HYMOFS
+		buf->buffer_full = true;
+#endif
 		return false;
+	}
 	d_ino = ino;
 	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino) {
 		buf->error = -EOVERFLOW;
@@ -431,6 +441,9 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 		.ctx.actor = filldir,
 		.count = count,
 		.current_dir = dirent
+#ifdef CONFIG_HYMOFS
+		, .buffer_full = false
+#endif
 	};
 	int error;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
@@ -438,13 +451,13 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 #endif
 
 	f = fdget_pos(fd);
-	if (!f.file)
+	if (!fd_file(f))
 		return -EBADF;
 #ifdef CONFIG_HYMOFS
-	hymofs_prepare_readdir(&buf.hymo, f.file);
-	if (f.file->f_pos >= HYMO_MAGIC_POS) {
+	hymofs_prepare_readdir(&buf.hymo, fd_file(f));
+	if (fd_file(f)->f_pos >= HYMO_MAGIC_POS) {
 		void __user *dir_ptr = buf.current_dir;
-		int res = hymofs_inject_entries(&buf.hymo, &dir_ptr, &buf.count, &f.file->f_pos);
+		int res = hymofs_inject_entries(&buf.hymo, &dir_ptr, &buf.count, &fd_file(f)->f_pos);
 		if (res >= 0)
 			error = count - buf.count;
 		else
@@ -456,16 +469,16 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 #endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	buf.sb = f.file->f_inode->i_sb;
-	inode = f.file->f_path.dentry->d_inode;
-	if (f.file->f_path.dentry && inode) {
-		if (susfs_is_base_dentry_android_data_dir(f.file->f_path.dentry))
+	buf.sb = fd_file(f)->f_inode->i_sb;
+	inode = fd_file(f)->f_path.dentry->d_inode;
+	if (fd_file(f)->f_path.dentry && inode) {
+		if (susfs_is_base_dentry_android_data_dir(fd_file(f)->f_path.dentry))
 		{
 			buf.is_base_dentry_android_data_root_dir = true;
 			buf.is_base_dentry_sdcard_root_dir = false;
 			goto orig_flow;
 		}
-		if (susfs_is_base_dentry_sdcard_dir(f.file->f_path.dentry))
+		if (susfs_is_base_dentry_sdcard_dir(fd_file(f)->f_path.dentry))
 		{
 			buf.is_base_dentry_sdcard_root_dir = true;
 			buf.is_base_dentry_android_data_root_dir = false;
@@ -475,9 +488,10 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	buf.is_base_dentry_android_data_root_dir = false;
 	buf.is_base_dentry_sdcard_root_dir = false;
 orig_flow:
-	buf.idmap = mnt_idmap(f.file->f_path.mnt);
+	buf.idmap = mnt_idmap(fd_file(f)->f_path.mnt);
 #endif
-	error = iterate_dir(f.file, &buf.ctx);
+
+	error = iterate_dir(fd_file(f), &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {
@@ -490,9 +504,9 @@ orig_flow:
 			error = count - buf.count;
 	}
 #ifdef CONFIG_HYMOFS
-	if (error >= 0) {
+	if (error >= 0 && !buf.buffer_full && buf.ctx.pos < HYMO_MAGIC_POS && !signal_pending(current)) {
 		void __user *dir_ptr = buf.current_dir;
-		int res = hymofs_inject_entries(&buf.hymo, &dir_ptr, &buf.count, &f.file->f_pos);
+		int res = hymofs_inject_entries(&buf.hymo, &dir_ptr, &buf.count, &fd_file(f)->f_pos);
 		if (res > 0)
 			error = count - buf.count;
 	}
@@ -517,6 +531,9 @@ struct getdents_callback64 {
 	int prev_reclen;
 	int count;
 	int error;
+#ifdef CONFIG_HYMOFS
+	bool buffer_full;
+#endif
 };
 
 static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
@@ -541,8 +558,12 @@ static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
 	if (unlikely(buf->error))
 		return false;
 	buf->error = -EINVAL;	/* only used if we fail.. */
-	if (reclen > buf->count)
+	if (reclen > buf->count) {
+#ifdef CONFIG_HYMOFS
+		buf->buffer_full = true;
+#endif
 		return false;
+	}
 	prev_reclen = buf->prev_reclen;
 	if (prev_reclen && signal_pending(current))
 		return false;
@@ -602,6 +623,9 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
 		.ctx.actor = filldir64,
 		.count = count,
 		.current_dir = dirent
+#ifdef CONFIG_HYMOFS
+		, .buffer_full = false
+#endif
 	};
 	int error;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
@@ -609,14 +633,14 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
 #endif
 
 	f = fdget_pos(fd);
-	if (!f.file)
+	if (!fd_file(f))
 		return -EBADF;
 
 #ifdef CONFIG_HYMOFS
-	hymofs_prepare_readdir(&buf.hymo, f.file);
-	if (f.file->f_pos >= HYMO_MAGIC_POS) {
+	hymofs_prepare_readdir(&buf.hymo, fd_file(f));
+	if (fd_file(f)->f_pos >= HYMO_MAGIC_POS) {
 		void __user *dir_ptr = buf.current_dir;
-		int res = hymofs_inject_entries64(&buf.hymo, &dir_ptr, &buf.count, &f.file->f_pos);
+		int res = hymofs_inject_entries64(&buf.hymo, &dir_ptr, &buf.count, &fd_file(f)->f_pos);
 		if (res >= 0)
 			error = count - buf.count;
 		else
@@ -628,16 +652,16 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
 #endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	buf.sb = f.file->f_inode->i_sb;
-	inode = f.file->f_path.dentry->d_inode;
-	if (f.file->f_path.dentry && inode) {
-		if (susfs_is_base_dentry_android_data_dir(f.file->f_path.dentry))
+	buf.sb = fd_file(f)->f_inode->i_sb;
+	inode = fd_file(f)->f_path.dentry->d_inode;
+	if (fd_file(f)->f_path.dentry && inode) {
+		if (susfs_is_base_dentry_android_data_dir(fd_file(f)->f_path.dentry))
 		{
 			buf.is_base_dentry_android_data_root_dir = true;
 			buf.is_base_dentry_sdcard_root_dir = false;
 			goto orig_flow;
 		}
-		if (susfs_is_base_dentry_sdcard_dir(f.file->f_path.dentry))
+		if (susfs_is_base_dentry_sdcard_dir(fd_file(f)->f_path.dentry))
 		{
 			buf.is_base_dentry_sdcard_root_dir = true;
 			buf.is_base_dentry_android_data_root_dir = false;
@@ -647,9 +671,10 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
 	buf.is_base_dentry_android_data_root_dir = false;
 	buf.is_base_dentry_sdcard_root_dir = false;
 orig_flow:
-	buf.idmap = mnt_idmap(f.file->f_path.mnt);
+	buf.idmap = mnt_idmap(fd_file(f)->f_path.mnt);
 #endif
-	error = iterate_dir(f.file, &buf.ctx);
+
+	error = iterate_dir(fd_file(f), &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {
@@ -663,9 +688,9 @@ orig_flow:
 			error = count - buf.count;
 	}
 #ifdef CONFIG_HYMOFS
-	if (error >= 0) {
+	if (error >= 0 && !buf.buffer_full && buf.ctx.pos < HYMO_MAGIC_POS && !signal_pending(current)) {
 		void __user *dir_ptr = buf.current_dir;
-		int res = hymofs_inject_entries64(&buf.hymo, &dir_ptr, &buf.count, &f.file->f_pos);
+		int res = hymofs_inject_entries64(&buf.hymo, &dir_ptr, &buf.count, &fd_file(f)->f_pos);
 		if (res > 0)
 			error = count - buf.count;
 	}
@@ -774,24 +799,24 @@ COMPAT_SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	struct inode *inode;
 #endif
 
-	if (!f.file)
+	if (!fd_file(f))
 		return -EBADF;
 
 #ifdef CONFIG_HYMOFS
-	hymofs_prepare_readdir(&buf.hymo, f.file);
+	hymofs_prepare_readdir(&buf.hymo, fd_file(f));
 #endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	buf.sb = f.file->f_inode->i_sb;
-	inode = f.file->f_path.dentry->d_inode;
-	if (f.file->f_path.dentry && inode) {
-		if (susfs_is_base_dentry_android_data_dir(f.file->f_path.dentry))
+	buf.sb = fd_file(f)->f_inode->i_sb;
+	inode = fd_file(f)->f_path.dentry->d_inode;
+	if (fd_file(f)->f_path.dentry && inode) {
+		if (susfs_is_base_dentry_android_data_dir(fd_file(f)->f_path.dentry))
 		{
 			buf.is_base_dentry_android_data_root_dir = true;
 			buf.is_base_dentry_sdcard_root_dir = false;
 			goto orig_flow;
 		}
-		if (susfs_is_base_dentry_sdcard_dir(f.file->f_path.dentry))
+		if (susfs_is_base_dentry_sdcard_dir(fd_file(f)->f_path.dentry))
 		{
 			buf.is_base_dentry_sdcard_root_dir = true;
 			buf.is_base_dentry_android_data_root_dir = false;
@@ -801,9 +826,10 @@ COMPAT_SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	buf.is_base_dentry_android_data_root_dir = false;
 	buf.is_base_dentry_sdcard_root_dir = false;
 orig_flow:
-	buf.idmap = mnt_idmap(f.file->f_path.mnt);
+	buf.idmap = mnt_idmap(fd_file(f)->f_path.mnt);
 #endif
-	error = iterate_dir(f.file, &buf.ctx);
+
+	error = iterate_dir(fd_file(f), &buf.ctx);
 	if (buf.result)
 		error = buf.result;
 
@@ -930,24 +956,24 @@ COMPAT_SYSCALL_DEFINE3(getdents, unsigned int, fd,
 #endif
 
 	f = fdget_pos(fd);
-	if (!f.file)
+	if (!fd_file(f))
 		return -EBADF;
 
 #ifdef CONFIG_HYMOFS
-	hymofs_prepare_readdir(&buf.hymo, f.file);
+	hymofs_prepare_readdir(&buf.hymo, fd_file(f));
 #endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	buf.sb = f.file->f_inode->i_sb;
-	inode = f.file->f_path.dentry->d_inode;
-	if (f.file->f_path.dentry && inode) {
-		if (susfs_is_base_dentry_android_data_dir(f.file->f_path.dentry))
+	buf.sb = fd_file(f)->f_inode->i_sb;
+	inode = fd_file(f)->f_path.dentry->d_inode;
+	if (fd_file(f)->f_path.dentry && inode) {
+		if (susfs_is_base_dentry_android_data_dir(fd_file(f)->f_path.dentry))
 		{
 			buf.is_base_dentry_android_data_root_dir = true;
 			buf.is_base_dentry_sdcard_root_dir = false;
 			goto orig_flow;
 		}
-		if (susfs_is_base_dentry_sdcard_dir(f.file->f_path.dentry))
+		if (susfs_is_base_dentry_sdcard_dir(fd_file(f)->f_path.dentry))
 		{
 			buf.is_base_dentry_sdcard_root_dir = true;
 			buf.is_base_dentry_android_data_root_dir = false;
@@ -957,9 +983,10 @@ COMPAT_SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	buf.is_base_dentry_android_data_root_dir = false;
 	buf.is_base_dentry_sdcard_root_dir = false;
 orig_flow:
-	buf.idmap = mnt_idmap(f.file->f_path.mnt);
+	buf.idmap = mnt_idmap(fd_file(f)->f_path.mnt);
 #endif
-	error = iterate_dir(f.file, &buf.ctx);
+
+	error = iterate_dir(fd_file(f), &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {
